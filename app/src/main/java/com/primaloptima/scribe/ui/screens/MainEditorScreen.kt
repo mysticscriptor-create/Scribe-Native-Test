@@ -1355,88 +1355,87 @@ fun MainEditorScreen(
             onToggleCollapse = { id -> editorVm.toggleCollapseFloatingWindow(id) },
             onMoveWindow = { id, x, y -> editorVm.moveFloatingWindow(id, x, y) }
         )
-    }
 
-    if (showRenameDialog && activeNote != null) {
-        val noteToRename = activeNote // captured to avoid race during recomposition
-        var renameText by remember { mutableStateOf(noteToRename?.name ?: "") }
-        FrostedDialog(
-            onDismissRequest = { showRenameDialog = false },
-            title = { Text("Rename Note") },
-            text = {
-                OutlinedTextField(
-                    value = renameText,
-                    onValueChange = { renameText = it },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val t = renameText.trim()
-                        if (t.isNotEmpty() && noteToRename != null) {
-                            bookVm.renameNote(noteToRename.id, t)
+        if (showRenameDialog && activeNote != null) {
+            val noteToRename = activeNote
+            var renameText by remember { mutableStateOf(noteToRename?.name ?: "") }
+            FrostedDialog(
+                onDismissRequest = { showRenameDialog = false },
+                title = { Text("Rename Note") },
+                text = {
+                    OutlinedTextField(
+                        value = renameText,
+                        onValueChange = { renameText = it },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val t = renameText.trim()
+                            if (t.isNotEmpty() && noteToRename != null) {
+                                bookVm.renameNote(noteToRename.id, t)
+                            }
+                            showRenameDialog = false
                         }
-                        showRenameDialog = false
-                    }
-                ) { Text("Rename") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRenameDialog = false }) { Text("Cancel") }
-            }
-        )
-    }
+                    ) { Text("Rename") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showRenameDialog = false }) { Text("Cancel") }
+                }
+            )
+        }
 
-    if (showCreateNoteDialog) {
-        var noteTitle by remember { mutableStateOf("") }
-        FrostedDialog(
-            onDismissRequest = { showCreateNoteDialog = false },
-            title = { Text("New Note") },
-            text = {
-                OutlinedTextField(
-                    value = noteTitle,
-                    onValueChange = { noteTitle = it },
-                    label = { Text("Title") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val t = noteTitle.trim()
-                        if (t.isNotEmpty()) {
-                            bookVm.createNote(t) { id ->
-                                showCreateNoteDialog = false
-                                editorVm.loadNote(id)
+        if (showCreateNoteDialog) {
+            var noteTitle by remember { mutableStateOf("") }
+            FrostedDialog(
+                onDismissRequest = { showCreateNoteDialog = false },
+                title = { Text("New Note") },
+                text = {
+                    OutlinedTextField(
+                        value = noteTitle,
+                        onValueChange = { noteTitle = it },
+                        label = { Text("Title") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val t = noteTitle.trim()
+                            if (t.isNotEmpty()) {
+                                bookVm.createNote(t) { id ->
+                                    showCreateNoteDialog = false
+                                    editorVm.loadNote(id)
+                                }
                             }
                         }
-                    }
-                ) { Text("Create") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCreateNoteDialog = false }) { Text("Cancel") }
-            }
-        )
-    }
-
-    filePickerTargetSlot?.let { targetSlot ->
-        FileExplorerOverlayDialog(
-            allNotes = if (leftDrawerMode == "Current") currentBookNotes else allNotes,
-            allFolders = if (leftDrawerMode == "Current") currentBookFolders else allFolders,
-            onSelectNote = { note ->
-                if (targetSlot == "top") {
-                    editorVm.addPinnedTop(note.id)
-                } else {
-                    editorVm.addPinnedBottom(note.id)
+                    ) { Text("Create") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showCreateNoteDialog = false }) { Text("Cancel") }
                 }
-                filePickerTargetSlot = null
-            },
-            onDismiss = { filePickerTargetSlot = null }
-        )
+            )
+        }
+
+        filePickerTargetSlot?.let { targetSlot ->
+            FileExplorerOverlayDialog(
+                allNotes = if (leftDrawerMode == "Current") currentBookNotes else allNotes,
+                allFolders = if (leftDrawerMode == "Current") currentBookFolders else allFolders,
+                onSelectNote = { note ->
+                    if (targetSlot == "top") {
+                        editorVm.addPinnedTop(note.id)
+                    } else {
+                        editorVm.addPinnedBottom(note.id)
+                    }
+                    filePickerTargetSlot = null
+                },
+                onDismiss = { filePickerTargetSlot = null }
+            )
+        }
     }
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
