@@ -21,7 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
@@ -66,6 +66,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 
 val LocalHazeState = compositionLocalOf<HazeState?> { null }
 val LocalAppTheme = compositionLocalOf<AppTheme?> { null }
@@ -333,19 +336,53 @@ fun frostedContainerColor(fallback: Color): Color {
  * The bitmap is the one-shot blurred screen capture taken just before the
  * panel/dialog opened, so it shows the actual UI content blurred behind it.
  */
-fun Modifier.drawWithOneShotBitmap(bitmap: Bitmap, tint: Color): Modifier =
-    this.drawWithContent {
-        // Draw the blurred capture scaled to fill this composable
-        drawImage(
-            image = bitmap.asImageBitmap(),
-            dstOffset = androidx.compose.ui.unit.IntOffset.Zero,
-            dstSize = androidx.compose.ui.unit.IntSize(size.width.toInt(), size.height.toInt())
-        )
-        // Tint overlay — gives the surface colour bleed that makes it feel glassy
-        drawRect(tint)
-        // Draw the composable's own content on top (text, icons etc.)
-        drawContent()
-    }
+fun Modifier.drawWithOneShotBitmap(bitmap: Bitmap, tint: Color): Modifier {
+    // Track this composable's position on screen so we can crop the correct
+    // slice of the blurred screenshot — making it look like frosted glass
+    // over whatever was physically behind this panel, not a scaled copy of the whole image.
+    var screenOffset by mutableStateOf(androidx.compose.ui.unit.IntOffset.Zero)
+    var rootSize by mutableStateOf(androidx.compose.ui.unit.IntSize.Zero)
+    return this
+        .onGloballyPositioned { coords ->
+            screenOffset = coords.positionInRoot().let {
+                androidx.compose.ui.unit.IntOffset(it.x.toInt(), it.y.toInt())
+            }
+            // Walk up to the root to get the full screen dimensions
+            var root = coords
+            while (root.parentCoordinates != null) root = root.parentCoordinates!!
+            rootSize = root.size
+        }
+        .drawWithContent {
+            val bitmapW = bitmap.width.toFloat()
+            val bitmapH = bitmap.height.toFloat()
+            // Use root (screen) dimensions for correct coordinate mapping
+            val screenW = if (rootSize.width > 0) rootSize.width.toFloat() else size.width
+            val screenH = if (rootSize.height > 0) rootSize.height.toFloat() else size.height
+
+            // Source rect: the slice of the full blurred bitmap that sits behind this composable
+            val srcLeft   = (screenOffset.x.toFloat() / screenW * bitmapW).coerceIn(0f, bitmapW)
+            val srcTop    = (screenOffset.y.toFloat() / screenH * bitmapH).coerceIn(0f, bitmapH)
+            val srcRight  = ((screenOffset.x + size.width)  / screenW * bitmapW).coerceIn(0f, bitmapW)
+            val srcBottom = ((screenOffset.y + size.height) / screenH * bitmapH).coerceIn(0f, bitmapH)
+
+            if (srcRight > srcLeft && srcBottom > srcTop) {
+                drawImage(
+                    image = bitmap.asImageBitmap(),
+                    srcOffset = androidx.compose.ui.unit.IntOffset(srcLeft.toInt(), srcTop.toInt()),
+                    srcSize   = androidx.compose.ui.unit.IntSize(
+                        (srcRight - srcLeft).toInt().coerceAtLeast(1),
+                        (srcBottom - srcTop).toInt().coerceAtLeast(1)
+                    ),
+                    dstOffset = androidx.compose.ui.unit.IntOffset.Zero,
+                    dstSize   = androidx.compose.ui.unit.IntSize(size.width.toInt(), size.height.toInt())
+                )
+            }
+            // Tint overlay — gives the surface colour bleed that makes it feel glassy
+            drawRect(tint)
+            // Draw the composable's own content on top (text, icons etc.)
+            drawContent()
+        }
+}
 
 fun parseComposeColor(hex: String, fallback: Color = Color.Black): Color {
     return try {
