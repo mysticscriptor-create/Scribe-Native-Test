@@ -43,6 +43,7 @@ import com.primaloptima.scribe.ui.theme.frostedBar
 import com.primaloptima.scribe.ui.theme.frostedFab
 import com.primaloptima.scribe.ui.theme.frostedPanel
 import com.primaloptima.scribe.ui.theme.FrostedDialog
+import com.primaloptima.scribe.ui.theme.frostedContainerColor
 import com.primaloptima.scribe.ui.theme.rememberAdaptiveTextColor
 import com.primaloptima.scribe.ui.util.rememberKeyboardVisibility
 import dev.chrisbanes.haze.hazeSource
@@ -1100,21 +1101,15 @@ fun MainEditorScreen(
                                     enter = slideInVertically(initialOffsetY = { it }),
                                     exit = slideOutVertically(targetOffsetY = { it })
                                 ) {
-                                    Surface(
-                                        shadowElevation = 8.dp,
-                                        color = Color.Transparent,
+                                    Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .frostedBar(hazeState)
+                                            .horizontalScroll(rememberScrollState())
+                                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .horizontalScroll(rememberScrollState())
-                                                .padding(horizontal = 8.dp, vertical = 6.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
                                             FormatButton(label = "B") { editorRef?.applyFormat("**", "**") }
                                             FormatButton(label = "I") { editorRef?.applyFormat("*", "*") }
                                             FormatButton(label = "H1") { editorRef?.applyLinePrefix("# ") }
@@ -1277,11 +1272,13 @@ fun MainEditorScreen(
 
                                         Surface(
                                             shape = CircleShape,
-                                            color = MaterialTheme.colorScheme.primaryContainer.copy(
-                                                alpha = if (LocalHazeState.current != null) 0.55f else 1f
+                                            color = frostedContainerColor(
+                                                fallback = MaterialTheme.colorScheme.primaryContainer
                                             ),
-                                            shadowElevation = 6.dp,
+                                            tonalElevation = 0.dp,
+                                            shadowElevation = 0.dp,
                                             modifier = Modifier
+                                                .clip(CircleShape)
                                                 .frostedFab(LocalHazeState.current)
                                                 .pointerInput(Unit) {
                                                     detectDragGestures { change, dragAmount ->
@@ -1318,6 +1315,13 @@ fun MainEditorScreen(
                                 if (zenMode) {
                                     FloatingActionButton(
                                         onClick = { editorVm.setZen(false) },
+                                        containerColor = frostedContainerColor(
+                                            fallback = MaterialTheme.colorScheme.primaryContainer
+                                        ),
+                                        elevation = FloatingActionButtonDefaults.elevation(
+                                            defaultElevation = 0.dp,
+                                            pressedElevation = 0.dp
+                                        ),
                                         modifier = Modifier
                                             .align(Alignment.BottomEnd)
                                             .padding(16.dp)

@@ -36,6 +36,7 @@ import com.primaloptima.scribe.ui.theme.LocalSolidSurface
 import com.primaloptima.scribe.ui.theme.frostedBar
 import com.primaloptima.scribe.ui.theme.frostedFab
 import com.primaloptima.scribe.ui.theme.FrostedDialog
+import com.primaloptima.scribe.ui.theme.frostedContainerColor
 import com.primaloptima.scribe.ui.theme.rememberAdaptiveTextColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -304,8 +305,14 @@ fun BookScreen(
                                             isFabExpanded = false
                                             showCreateNoteDialog = true
                                         },
-                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        containerColor = frostedContainerColor(
+                                            fallback = MaterialTheme.colorScheme.primary
+                                        ),
                                         contentColor = MaterialTheme.colorScheme.onPrimary,
+                                        elevation = FloatingActionButtonDefaults.elevation(
+                                            defaultElevation = 0.dp,
+                                            pressedElevation = 0.dp
+                                        ),
                                         modifier = Modifier.frostedFab(LocalHazeState.current)
                                     ) {
                                         Icon(Icons.Default.Description, contentDescription = "New Text File")
@@ -333,9 +340,14 @@ fun BookScreen(
                                             isFabExpanded = false
                                             showCreateFolderDialog = true
                                         },
-                                        // Was secondaryContainer (M3 purple default) — now uses themed accent
-                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        containerColor = frostedContainerColor(
+                                            fallback = MaterialTheme.colorScheme.primary
+                                        ),
                                         contentColor = MaterialTheme.colorScheme.onPrimary,
+                                        elevation = FloatingActionButtonDefaults.elevation(
+                                            defaultElevation = 0.dp,
+                                            pressedElevation = 0.dp
+                                        ),
                                         modifier = Modifier.frostedFab(LocalHazeState.current)
                                     ) {
                                         Icon(Icons.Default.CreateNewFolder, contentDescription = "New Folder")
@@ -348,8 +360,14 @@ fun BookScreen(
 
                         FloatingActionButton(
                             onClick = { isFabExpanded = !isFabExpanded },
-                            containerColor = MaterialTheme.colorScheme.primary,
+                            containerColor = frostedContainerColor(
+                                fallback = MaterialTheme.colorScheme.primary
+                            ),
                             contentColor = MaterialTheme.colorScheme.onPrimary,
+                            elevation = FloatingActionButtonDefaults.elevation(
+                                defaultElevation = 0.dp,
+                                pressedElevation = 0.dp
+                            ),
                             modifier = Modifier.frostedFab(LocalHazeState.current)
                         ) {
                             Icon(

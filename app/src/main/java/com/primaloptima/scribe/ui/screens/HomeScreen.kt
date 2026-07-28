@@ -795,15 +795,6 @@ private fun BookGridCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .graphicsLayer {
-                translationY    = floatY
-                scaleX          = scale
-                scaleY          = scale
-                rotationX       = rotX
-                rotationY       = rotY
-                cameraDistance  = 10f * density
-                shadowElevation = elev.dp.toPx()
-            }
             .pointerInput(Unit) {
                 detectTapGestures(
                     onPress = { offset ->
@@ -817,9 +808,20 @@ private fun BookGridCard(
             },
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // graphicsLayer is scoped to the cover Box only — floating bob, 3-D tilt,
+        // and shadow should not affect the title or stats text below.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .graphicsLayer {
+                    translationY    = floatY
+                    scaleX          = scale
+                    scaleY          = scale
+                    rotationX       = rotX
+                    rotationY       = rotY
+                    cameraDistance  = 10f * density
+                    shadowElevation = elev.dp.toPx()
+                }
                 .aspectRatio(0.72f)
                 .shadow(elev.dp, RoundedCornerShape(8.dp))
                 .clip(RoundedCornerShape(8.dp))

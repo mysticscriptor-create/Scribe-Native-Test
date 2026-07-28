@@ -86,15 +86,17 @@ fun autoTextColor(bg: Color): Color {
 
 @Composable
 fun Modifier.frostedBar(hazeState: HazeState?): Modifier {
+    val theme = LocalAppTheme.current
     val solidSurface = LocalSolidSurface.current
     val legacyBlur = LocalLegacyBlur.current
     val blurAllowed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S || legacyBlur
-    return if (blurAllowed) {
-        if (hazeState != null) {
-            this.hazeEffect(state = hazeState, style = HazeMaterials.thin())
-        } else {
-            this
-        }
+    val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
+            (theme.bgMode == "image" || theme.bgMode == "blurred")
+    return if (!hasBgImage) {
+        // No background image — bars use a solid surface so they're always readable
+        this.background(solidSurface)
+    } else if (blurAllowed && hazeState != null) {
+        this.hazeEffect(state = hazeState, style = HazeMaterials.thin())
     } else {
         this.background(solidSurface.copy(alpha = 0.82f))
     }
@@ -147,7 +149,8 @@ fun Modifier.frostedPanel(hazeState: HazeState?): Modifier {
     val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
             (theme.bgMode == "image" || theme.bgMode == "blurred")
     return if (!hasBgImage || hazeState == null) {
-        this
+        // No background image — apply solid surface so the panel is always opaque
+        this.background(solidSurface)
     } else if (blurAllowed) {
         this.hazeEffect(state = hazeState, style = HazeMaterials.regular())
     } else {
@@ -275,6 +278,30 @@ fun FrostedDialog(
             }
         }
     }
+}
+
+/**
+ * Returns the correct containerColor for a Card or FAB when frosted glass is active.
+ * When a background image is set and blur is allowed, returns [Color.Transparent] so
+ * hazeEffect shows through. Otherwise returns [fallback].
+ *
+ * Usage:
+ *   ElevatedCard(
+ *       colors = CardDefaults.elevatedCardColors(
+ *           containerColor = frostedContainerColor(fallback = surface.copy(alpha = 0.92f))
+ *       ),
+ *       modifier = Modifier.frostedCard(hazeState)
+ *   )
+ */
+@Composable
+fun frostedContainerColor(fallback: Color): Color {
+    val theme = LocalAppTheme.current
+    val hazeState = LocalHazeState.current
+    val legacyBlur = LocalLegacyBlur.current
+    val blurAllowed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S || legacyBlur
+    val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
+            (theme.bgMode == "image" || theme.bgMode == "blurred")
+    return if (hasBgImage && hazeState != null && blurAllowed) Color.Transparent else fallback
 }
 
 fun parseComposeColor(hex: String, fallback: Color = Color.Black): Color {
@@ -496,9 +523,20 @@ fun ScribeComposeTheme(
 
     val hazeState = rememberHazeState(blurEnabled = true)
     val prefsManager = remember { PrefsManager(context) }
-    val legacyBlur = remember { mutableStateOf(prefsManager.legacyBlurEnabled) }
-    // Re-read whenever the composable re-enters (e.g. after returning from ThemeEditScreen)
-    LaunchedEffect(Unit) { legacyBlur.value = prefsManager.legacyBlurEnabled }
+    var legacyBlurEnabled by remember { mutableStateOf(prefsManager.legacyBlurEnabled) }
+
+    // Re-read the pref every time this composable re-enters the composition
+    // (e.g. returning from ThemeEditScreen where the toggle lives).
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                legacyBlurEnabled = prefsManager.legacyBlurEnabled
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     MaterialTheme(
         colorScheme = animatedColorScheme,
@@ -508,7 +546,7 @@ fun ScribeComposeTheme(
                 LocalAppTheme provides resolvedTheme,
                 LocalBgAnalysisBitmap provides analysisBitmap,
                 LocalScreenSize provides Pair(screenWidthPx, screenHeightPx),
-                LocalLegacyBlur provides legacyBlur.value,
+                LocalLegacyBlur provides legacyBlurEnabled,
                 // Always the fully-opaque surface colour — safe to use in popups
                 // and menus that must not be see-through.
                 LocalSolidSurface provides animSurface
