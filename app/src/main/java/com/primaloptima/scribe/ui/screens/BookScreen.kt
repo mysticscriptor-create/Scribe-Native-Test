@@ -303,10 +303,10 @@ fun BookScreen(
                                     }
                                     SmallFloatingActionButton(
                                         onClick = {
-                                        shape = CircleShape,
                                             isFabExpanded = false
                                             showCreateNoteDialog = true
                                         },
+                                        shape = CircleShape,
                                         containerColor = frostedContainerColor(
                                             fallback = MaterialTheme.colorScheme.primary
                                         ),
@@ -339,10 +339,10 @@ fun BookScreen(
                                     }
                                     SmallFloatingActionButton(
                                         onClick = {
-                                        shape = CircleShape,
                                             isFabExpanded = false
                                             showCreateFolderDialog = true
                                         },
+                                        shape = CircleShape,
                                         containerColor = frostedContainerColor(
                                             fallback = MaterialTheme.colorScheme.primary
                                         ),
