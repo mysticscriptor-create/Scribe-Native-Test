@@ -3,6 +3,7 @@ package com.primaloptima.scribe
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import com.primaloptima.scribe.ui.screens.ThemeEditScreen
 import com.primaloptima.scribe.ui.theme.ScribeComposeTheme
@@ -13,6 +14,7 @@ class ThemeEditActivity : ComponentActivity() {
     private val vm: ThemeViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         val themeId = intent.getStringExtra("theme_id") ?: ""
 

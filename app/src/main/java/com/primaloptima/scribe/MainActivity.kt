@@ -3,6 +3,7 @@ package com.primaloptima.scribe
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatDelegate
 import com.primaloptima.scribe.data.Note
@@ -26,6 +27,7 @@ class MainActivity : ComponentActivity() {
     private val shortcutsVm: ShortcutsViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
         super.onCreate(savedInstanceState)
 

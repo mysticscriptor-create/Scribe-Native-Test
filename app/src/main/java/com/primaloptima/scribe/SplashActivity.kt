@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import com.primaloptima.scribe.ui.splash.ScribeSplash
@@ -20,12 +21,13 @@ class SplashActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
+        // Set icon appearance to match the user's theme even before
+        // ScribeComposeTheme's SideEffect runs (first frame).
         val activeTheme = ThemeManager(this).activeTheme()
         val backgroundColor = ThemeManager.parseColor(activeTheme.colors.background)
-        window.statusBarColor = backgroundColor
-        window.navigationBarColor = backgroundColor
         WindowCompat.getInsetsController(window, window.decorView).apply {
             val darkBackground = ThemeManager.isColorDark(backgroundColor)
             isAppearanceLightStatusBars = !darkBackground
