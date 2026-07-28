@@ -1130,7 +1130,6 @@ fun MainEditorScreen(
                                         }
                                     }
                                 }
-                            }
                         ) { padding ->
                             Box(
                                 modifier = Modifier
@@ -1436,6 +1435,7 @@ fun MainEditorScreen(
             )
         }
     }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
