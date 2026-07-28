@@ -588,12 +588,11 @@ fun ScribeComposeTheme(
         outlineVariant = animOutline
     )
 
+    // enableEdgeToEdge() (called in each Activity) owns bar transparency.
+    // Here we only update icon/caret appearance to match the active theme.
     val window = (LocalContext.current as? Activity)?.window
     SideEffect {
         window?.let { win ->
-            val barColor = (if (showWholeAppBg) Color.Transparent else animSurface).toArgb()
-            win.statusBarColor = barColor
-            win.navigationBarColor = barColor
             WindowCompat.getInsetsController(win, win.decorView).apply {
                 isAppearanceLightStatusBars = isLight
                 isAppearanceLightNavigationBars = isLight
