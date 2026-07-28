@@ -117,9 +117,11 @@ fun Modifier.frostedFab(hazeState: HazeState?): Modifier {
     val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
             (theme.bgMode == "image" || theme.bgMode == "blurred")
     return if (!hasBgImage || hazeState == null) {
-        this
+        if (applyFallbackBackground) this.clip(shape).background(solidSurface.copy(alpha = solidAlpha)) else this
     } else if (blurAllowed) {
-        this.hazeEffect(state = hazeState, style = HazeMaterials.regular())
+        this
+            .clip(androidx.compose.foundation.shape.CircleShape)
+            .hazeEffect(state = hazeState, style = HazeMaterials.regular())
     } else {
         this.background(solidSurface.copy(alpha = 0.75f), shape = androidx.compose.foundation.shape.CircleShape)
     }
@@ -176,7 +178,10 @@ fun Modifier.frostedPanel(hazeState: HazeState?): Modifier {
 fun Modifier.frostedCard(
     hazeState: HazeState?,
     shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(16.dp),
-    solidAlpha: Float = 0.92f
+    solidAlpha: Float = 0.92f,
+    /** When true, applies clip+solid background even when no bg image is active.
+     *  Use for plain Box/Container callers that don't have their own background. */
+    applyFallbackBackground: Boolean = false
 ): Modifier {
     val theme = LocalAppTheme.current
     val solidSurface = LocalSolidSurface.current
@@ -236,8 +241,8 @@ fun FrostedDialog(
     ) {
         val containerModifier = if (hasBgImage && hazeState != null && blurAllowed) {
             Modifier
-                .hazeEffect(state = hazeState, style = HazeMaterials.regular())
                 .clip(shape)
+                .hazeEffect(state = hazeState, style = HazeMaterials.regular())
         } else {
             Modifier
                 .background(solidSurface, shape = shape)
