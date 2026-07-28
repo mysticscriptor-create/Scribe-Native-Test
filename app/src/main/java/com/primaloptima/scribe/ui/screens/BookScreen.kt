@@ -74,6 +74,7 @@ fun BookScreen(
     val view = LocalView.current
     var oneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var captured by remember { mutableStateOf(false) }
+    var isFabExpanded by remember { mutableStateOf(false) }
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
         // Capture when FAB expands (FABs appear instantly, so capture on expand)
         LaunchedEffect(isFabExpanded) {
@@ -97,9 +98,6 @@ fun BookScreen(
 
     // Bottom Bar tab state inside BookScreen: 0: Write, 1: Statistics
     var selectedTab by remember { mutableIntStateOf(0) }
-
-    // FAB expanded state
-    var isFabExpanded by remember { mutableStateOf(false) }
 
     // Dialog states
     var showCreateNoteDialog by remember { mutableStateOf(false) }
