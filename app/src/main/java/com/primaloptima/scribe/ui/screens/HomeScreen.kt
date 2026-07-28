@@ -37,13 +37,18 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import com.primaloptima.scribe.ui.theme.LocalAppTheme
+import android.graphics.Bitmap
+import android.os.Build
 import com.primaloptima.scribe.ui.theme.LocalHazeState
+import com.primaloptima.scribe.ui.theme.LocalOneShotBitmap
 import com.primaloptima.scribe.ui.theme.LocalSolidSurface
 import com.primaloptima.scribe.ui.theme.frostedBar
 import com.primaloptima.scribe.ui.theme.frostedFab
 import com.primaloptima.scribe.ui.theme.frostedPanel
 import com.primaloptima.scribe.ui.theme.FrostedDialog
 import com.primaloptima.scribe.ui.theme.parseComposeColor
+import com.primaloptima.scribe.util.BitmapBlur
+import androidx.compose.ui.platform.LocalView
 import com.primaloptima.scribe.ui.theme.rememberAdaptiveTextColor
 import dev.chrisbanes.haze.hazeSource
 import androidx.compose.ui.text.SpanStyle
@@ -80,6 +85,24 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     var rightPanelVisible by remember { mutableStateOf(false) }
+
+    // One-shot blurred capture for pre-API-31 frosted glass on the left drawer
+    val view = LocalView.current
+    var oneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var captured by remember { mutableStateOf(false) }
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        LaunchedEffect(drawerState.currentValue, drawerState.targetValue) {
+            if (drawerState.targetValue == DrawerValue.Open && !captured) {
+                captured = true
+                oneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    BitmapBlur.captureAndBlur(view, radius = 15)
+                }
+            } else if (drawerState.currentValue == DrawerValue.Closed) {
+                captured = false
+                oneShotBitmap = null
+            }
+        }
+    }
     val repo = remember { ThemeDataStoreRepo(context) }
 
     // 0: Books, 1: Notes, 2: Statistics
@@ -172,6 +195,7 @@ fun HomeScreen(
         drawerState = drawerState,
         gesturesEnabled = true,
         drawerContent = {
+            CompositionLocalProvider(LocalOneShotBitmap provides oneShotBitmap) {
             ModalDrawerSheet(
                 drawerContainerColor = Color.Transparent,
                 modifier = Modifier
@@ -231,6 +255,7 @@ fun HomeScreen(
                     modifier = Modifier.padding(horizontal = 12.dp)
                 )
             }
+            } // end CompositionLocalProvider(LocalOneShotBitmap provides oneShotBitmap)
         }
     ) {
         Scaffold(

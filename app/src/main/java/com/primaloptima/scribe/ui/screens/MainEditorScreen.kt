@@ -37,7 +37,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
+import android.graphics.Bitmap
+import android.os.Build
 import com.primaloptima.scribe.ui.theme.LocalHazeState
+import com.primaloptima.scribe.ui.theme.LocalOneShotBitmap
 import com.primaloptima.scribe.ui.theme.LocalSolidSurface
 import com.primaloptima.scribe.ui.theme.frostedBar
 import com.primaloptima.scribe.ui.theme.frostedFab
@@ -46,6 +49,8 @@ import com.primaloptima.scribe.ui.theme.FrostedDialog
 import com.primaloptima.scribe.ui.theme.frostedContainerColor
 import com.primaloptima.scribe.ui.theme.frostedCard
 import com.primaloptima.scribe.ui.theme.rememberAdaptiveTextColor
+import com.primaloptima.scribe.util.BitmapBlur
+import androidx.compose.ui.platform.LocalView
 import com.primaloptima.scribe.ui.util.rememberKeyboardVisibility
 import dev.chrisbanes.haze.hazeSource
 import androidx.compose.ui.layout.ContentScale
@@ -94,6 +99,41 @@ fun MainEditorScreen(
 
     val leftDrawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val rightDrawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+
+    // One-shot blurred captures for pre-API-31 frosted glass.
+    // Captured once when each drawer starts opening; cleared when it closes.
+    val view = LocalView.current
+    var leftOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var rightOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    // Track whether we've already captured for the current open gesture
+    var leftCaptured by remember { mutableStateOf(false) }
+    var rightCaptured by remember { mutableStateOf(false) }
+
+    // Trigger capture when drawers start sliding open (pre-API-31 only)
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        LaunchedEffect(leftDrawerState.currentValue, leftDrawerState.targetValue) {
+            if (leftDrawerState.targetValue == DrawerValue.Open && !leftCaptured) {
+                leftCaptured = true
+                leftOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    BitmapBlur.captureAndBlur(view, radius = 15)
+                }
+            } else if (leftDrawerState.currentValue == DrawerValue.Closed) {
+                leftCaptured = false
+                leftOneShotBitmap = null
+            }
+        }
+        LaunchedEffect(rightDrawerState.currentValue, rightDrawerState.targetValue) {
+            if (rightDrawerState.targetValue == DrawerValue.Open && !rightCaptured) {
+                rightCaptured = true
+                rightOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    BitmapBlur.captureAndBlur(view, radius = 15)
+                }
+            } else if (rightDrawerState.currentValue == DrawerValue.Closed) {
+                rightCaptured = false
+                rightOneShotBitmap = null
+            }
+        }
+    }
 
     val activeNote by editorVm.activeNote.observeAsState()
     val wordCount by editorVm.wordCount.observeAsState(0)
@@ -255,6 +295,7 @@ fun MainEditorScreen(
             drawerState = leftDrawerState,
             gesturesEnabled = true,
             drawerContent = {
+                CompositionLocalProvider(LocalOneShotBitmap provides leftOneShotBitmap) {
                 ModalDrawerSheet(
                     drawerContainerColor = Color.Transparent,
                     modifier = Modifier
@@ -655,6 +696,7 @@ fun MainEditorScreen(
                         }
                     }
                 }
+                } // end CompositionLocalProvider(LocalOneShotBitmap provides leftOneShotBitmap)
             }
         ) {
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -663,6 +705,7 @@ fun MainEditorScreen(
                     gesturesEnabled = true,
                     drawerContent = {
                         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        CompositionLocalProvider(LocalOneShotBitmap provides rightOneShotBitmap) {
                             ModalDrawerSheet(
                                 drawerContainerColor = Color.Transparent,
                                 modifier = Modifier
@@ -954,6 +997,7 @@ fun MainEditorScreen(
                                 }
                             }
                         }
+                        } // end CompositionLocalProvider(LocalOneShotBitmap provides rightOneShotBitmap)
                     }
                 ) {
                     val hazeState = LocalHazeState.current

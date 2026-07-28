@@ -31,13 +31,18 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import android.graphics.Bitmap
+import android.os.Build
 import com.primaloptima.scribe.ui.theme.LocalHazeState
+import com.primaloptima.scribe.ui.theme.LocalOneShotBitmap
 import com.primaloptima.scribe.ui.theme.LocalSolidSurface
 import com.primaloptima.scribe.ui.theme.frostedBar
 import com.primaloptima.scribe.ui.theme.frostedFab
 import com.primaloptima.scribe.ui.theme.FrostedDialog
 import com.primaloptima.scribe.ui.theme.frostedContainerColor
 import com.primaloptima.scribe.ui.theme.rememberAdaptiveTextColor
+import com.primaloptima.scribe.util.BitmapBlur
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -64,6 +69,25 @@ fun BookScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+
+    // One-shot blurred capture for pre-API-31 frosted glass (FABs + dialogs)
+    val view = LocalView.current
+    var oneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var captured by remember { mutableStateOf(false) }
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        // Capture when FAB expands (FABs appear instantly, so capture on expand)
+        LaunchedEffect(isFabExpanded) {
+            if (isFabExpanded && !captured) {
+                captured = true
+                oneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    BitmapBlur.captureAndBlur(view, radius = 15)
+                }
+            } else if (!isFabExpanded) {
+                captured = false
+                oneShotBitmap = null
+            }
+        }
+    }
 
     val book by vm.book.observeAsState()
     val notes by vm.notes.observeAsState(emptyList())
@@ -117,6 +141,7 @@ fun BookScreen(
 
     val hazeState = LocalHazeState.current
 
+    CompositionLocalProvider(LocalOneShotBitmap provides oneShotBitmap) {
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
@@ -636,6 +661,7 @@ fun BookScreen(
             }
         )
     }
+    } // end CompositionLocalProvider(LocalOneShotBitmap provides oneShotBitmap)
 }
 
 @Composable
