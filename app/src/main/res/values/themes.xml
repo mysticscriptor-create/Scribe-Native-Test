@@ -30,16 +30,9 @@
         <item name="android:windowBackground">@color/md_theme_light_background</item>
     </style>
 
-    <!-- Android 12+ SplashScreen API theme, required by SplashActivity.
-         installSplashScreen() mandates a Theme.SplashScreen parent.
-         windowSplashScreenBackground is a static fallback only — the actual
-         background colour is applied at runtime by ThemeManager before the
-         Compose content renders. postSplashScreenTheme hands off to the
-         main app theme once the splash is dismissed. -->
-    <style name="Theme.Scribe.Splash.Dynamic" parent="Theme.SplashScreen">
-        <item name="windowSplashScreenBackground">@color/md_theme_light_background</item>
-        <item name="postSplashScreenTheme">@style/Theme.Scribe</item>
-    </style>
+    <!-- Theme.Scribe.Splash.Dynamic is defined in
+         res/values/scribe_splash_dynamic_theme.xml — kept separate so it
+         can coexist cleanly with the legacy Theme.Scribe.Splash above. -->
 
     <!-- Section header style (used by settings layouts) -->
     <style name="SectionHeader">
