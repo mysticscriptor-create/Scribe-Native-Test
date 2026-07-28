@@ -22,7 +22,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Canvas
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
@@ -337,17 +336,15 @@ fun frostedContainerColor(fallback: Color): Color {
 fun Modifier.drawWithOneShotBitmap(bitmap: Bitmap, tint: Color): Modifier =
     this.drawWithContent {
         // Draw the blurred capture scaled to fill this composable
-        drawIntoCanvas { canvas ->
-            val paint = android.graphics.Paint().apply {
-                isFilterBitmap = true
-            }
-            canvas.nativeCanvas.drawBitmap(
-                bitmap,
-                null,
-                android.graphics.RectF(0f, 0f, size.width, size.height),
-                paint
-            )
+        val paint = android.graphics.Paint().apply {
+            isFilterBitmap = true
         }
+        drawContext.canvas.nativeCanvas.drawBitmap(
+            bitmap,
+            null,
+            android.graphics.RectF(0f, 0f, size.width, size.height),
+            paint
+        )
         // Tint overlay — gives the surface colour bleed that makes it feel glassy
         drawRect(tint)
         // Draw the composable's own content on top (text, icons etc.)
