@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
@@ -69,8 +71,16 @@ val LocalHazeState = compositionLocalOf<HazeState?> { null }
 val LocalAppTheme = compositionLocalOf<AppTheme?> { null }
 val LocalBgAnalysisBitmap = compositionLocalOf<Bitmap?> { null }
 val LocalScreenSize = compositionLocalOf { Pair(1080f, 1920f) }
-/** True when the user has opted into CPU/RenderScript blur on pre-API-31 devices. */
+/** True when the user has opted into CPU blur on pre-API-31 devices. */
 val LocalLegacyBlur = compositionLocalOf { false }
+
+/**
+ * Holds the one-shot blurred screenshot bitmap captured just before a panel/dialog
+ * opens on pre-API-31 devices. Set by the screen that owns the drawer/dialog trigger,
+ * consumed by [frostedPanel], [frostedCard], [frostedFab], [FrostedDialog].
+ * Null when no capture has been taken or when running on API 31+.
+ */
+val LocalOneShotBitmap = compositionLocalOf<Bitmap?> { null }
 
 /**
  * Always holds the fully-opaque theme surface color, even when a background image
@@ -88,15 +98,16 @@ fun autoTextColor(bg: Color): Color {
 fun Modifier.frostedBar(hazeState: HazeState?): Modifier {
     val theme = LocalAppTheme.current
     val solidSurface = LocalSolidSurface.current
-    val legacyBlur = LocalLegacyBlur.current
-    val blurAllowed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S || legacyBlur
+    val oneShotBitmap = LocalOneShotBitmap.current
     val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
             (theme.bgMode == "image" || theme.bgMode == "blurred")
     return if (!hasBgImage) {
-        // No background image — bars use a solid surface so they're always readable
         this.background(solidSurface)
-    } else if (blurAllowed && hazeState != null) {
+    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null) {
         this.hazeEffect(state = hazeState, style = HazeMaterials.thin())
+    } else if (oneShotBitmap != null) {
+        // Pre-API-31: draw the one-shot blurred capture as the bar background
+        this.drawWithOneShotBitmap(oneShotBitmap, solidSurface.copy(alpha = 0.3f))
     } else {
         this.background(solidSurface.copy(alpha = 0.82f))
     }
@@ -112,16 +123,19 @@ fun Modifier.frostedBar(hazeState: HazeState?): Modifier {
 fun Modifier.frostedFab(hazeState: HazeState?): Modifier {
     val theme = LocalAppTheme.current
     val solidSurface = LocalSolidSurface.current
-    val legacyBlur = LocalLegacyBlur.current
-    val blurAllowed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S || legacyBlur
+    val oneShotBitmap = LocalOneShotBitmap.current
     val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
             (theme.bgMode == "image" || theme.bgMode == "blurred")
-    return if (!hasBgImage || hazeState == null) {
+    return if (!hasBgImage) {
         this
-    } else if (blurAllowed) {
+    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null) {
         this
             .clip(androidx.compose.foundation.shape.CircleShape)
             .hazeEffect(state = hazeState, style = HazeMaterials.regular())
+    } else if (oneShotBitmap != null) {
+        this
+            .clip(androidx.compose.foundation.shape.CircleShape)
+            .drawWithOneShotBitmap(oneShotBitmap, solidSurface.copy(alpha = 0.3f))
     } else {
         this.background(solidSurface.copy(alpha = 0.75f), shape = androidx.compose.foundation.shape.CircleShape)
     }
@@ -146,15 +160,15 @@ fun Modifier.frostedFab(hazeState: HazeState?): Modifier {
 fun Modifier.frostedPanel(hazeState: HazeState?): Modifier {
     val theme = LocalAppTheme.current
     val solidSurface = LocalSolidSurface.current
-    val legacyBlur = LocalLegacyBlur.current
-    val blurAllowed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S || legacyBlur
+    val oneShotBitmap = LocalOneShotBitmap.current
     val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
             (theme.bgMode == "image" || theme.bgMode == "blurred")
-    return if (!hasBgImage || hazeState == null) {
-        // No background image — apply solid surface so the panel is always opaque
+    return if (!hasBgImage) {
         this.background(solidSurface)
-    } else if (blurAllowed) {
+    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null) {
         this.hazeEffect(state = hazeState, style = HazeMaterials.regular())
+    } else if (oneShotBitmap != null) {
+        this.drawWithOneShotBitmap(oneShotBitmap, solidSurface.copy(alpha = 0.25f))
     } else {
         this.background(solidSurface.copy(alpha = 0.95f))
     }
@@ -185,16 +199,19 @@ fun Modifier.frostedCard(
 ): Modifier {
     val theme = LocalAppTheme.current
     val solidSurface = LocalSolidSurface.current
-    val legacyBlur = LocalLegacyBlur.current
-    val blurAllowed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S || legacyBlur
     val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
             (theme.bgMode == "image" || theme.bgMode == "blurred")
+    val oneShotBitmap = LocalOneShotBitmap.current
     return if (!hasBgImage || hazeState == null) {
         this
-    } else if (blurAllowed) {
+    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         this
             .clip(shape)
             .hazeEffect(state = hazeState, style = HazeMaterials.regular())
+    } else if (oneShotBitmap != null) {
+        this
+            .clip(shape)
+            .drawWithOneShotBitmap(oneShotBitmap, solidSurface.copy(alpha = 0.25f))
     } else {
         this
             .clip(shape)
@@ -222,9 +239,8 @@ fun FrostedDialog(
 ) {
     val hazeState = LocalHazeState.current
     val solidSurface = LocalSolidSurface.current
+    val oneShotBitmap = LocalOneShotBitmap.current
     val theme = LocalAppTheme.current
-    val legacyBlur = LocalLegacyBlur.current
-    val blurAllowed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S || legacyBlur
     val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
             (theme.bgMode == "image" || theme.bgMode == "blurred")
     val shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp)
@@ -239,13 +255,13 @@ fun FrostedDialog(
             ) { onDismissRequest() },
         contentAlignment = Alignment.Center
     ) {
-        val containerModifier = if (hasBgImage && hazeState != null && blurAllowed) {
-            Modifier
-                .clip(shape)
-                .hazeEffect(state = hazeState, style = HazeMaterials.regular())
-        } else {
-            Modifier
-                .background(solidSurface, shape = shape)
+        val containerModifier = when {
+            hasBgImage && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null ->
+                Modifier.clip(shape).hazeEffect(state = hazeState, style = HazeMaterials.regular())
+            hasBgImage && oneShotBitmap != null ->
+                Modifier.clip(shape).drawWithOneShotBitmap(oneShotBitmap, solidSurface.copy(alpha = 0.25f))
+            else ->
+                Modifier.background(solidSurface, shape = shape)
         }
 
         Column(
@@ -302,12 +318,40 @@ fun FrostedDialog(
 fun frostedContainerColor(fallback: Color): Color {
     val theme = LocalAppTheme.current
     val hazeState = LocalHazeState.current
-    val legacyBlur = LocalLegacyBlur.current
-    val blurAllowed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S || legacyBlur
+    val oneShotBitmap = LocalOneShotBitmap.current
     val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
             (theme.bgMode == "image" || theme.bgMode == "blurred")
-    return if (hasBgImage && hazeState != null && blurAllowed) Color.Transparent else fallback
+    // Transparent so the frosted modifier (hazeEffect or one-shot bitmap) shows through
+    val legacyReady = Build.VERSION.SDK_INT < Build.VERSION_CODES.S && oneShotBitmap != null
+    val modernReady = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null
+    return if (hasBgImage && (modernReady || legacyReady)) Color.Transparent else fallback
 }
+
+/**
+ * Draws the [bitmap] as a tiled/stretched background behind this composable,
+ * then overlays [tint] on top to achieve the frosted glass look.
+ * The bitmap is the one-shot blurred screen capture taken just before the
+ * panel/dialog opened, so it shows the actual UI content blurred behind it.
+ */
+fun Modifier.drawWithOneShotBitmap(bitmap: Bitmap, tint: Color): Modifier =
+    this.drawWithContent {
+        // Draw the blurred capture scaled to fill this composable
+        drawIntoCanvas { canvas ->
+            val paint = android.graphics.Paint().apply {
+                isFilterBitmap = true
+            }
+            canvas.nativeCanvas.drawBitmap(
+                bitmap,
+                null,
+                android.graphics.RectF(0f, 0f, size.width, size.height),
+                paint
+            )
+        }
+        // Tint overlay — gives the surface colour bleed that makes it feel glassy
+        drawRect(tint)
+        // Draw the composable's own content on top (text, icons etc.)
+        drawContent()
+    }
 
 fun parseComposeColor(hex: String, fallback: Color = Color.Black): Color {
     return try {
@@ -552,17 +596,18 @@ fun ScribeComposeTheme(
                 LocalBgAnalysisBitmap provides analysisBitmap,
                 LocalScreenSize provides Pair(screenWidthPx, screenHeightPx),
                 LocalLegacyBlur provides legacyBlurEnabled,
-                // Always the fully-opaque surface colour — safe to use in popups
-                // and menus that must not be see-through.
-                LocalSolidSurface provides animSurface
+                LocalSolidSurface provides animSurface,
+                // One-shot bitmap starts null; screens set it via their own
+                // CompositionLocalProvider wrapping the drawer/dialog content.
+                LocalOneShotBitmap provides null
             ) {
                 val bgOpacity = resolvedTheme.backgroundImageOpacity ?: 0.35f
                 val bgMode = resolvedTheme.bgMode
                 val blurIntensity = resolvedTheme.blurIntensity
 
                 // On API < 31 we can't use RenderEffect on a live composable, so we
-                // pre-blur the source bitmap once using RenderScript / box blur and
-                // display that pre-blurred bitmap instead.
+                // On API < 31 we pre-blur the source bitmap once using pure Kotlin
+                // stack blur and display that pre-blurred bitmap instead.
                 val needsSoftwareBlur = bgMode == "blurred" &&
                         blurIntensity > 0f &&
                         Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&
@@ -592,7 +637,7 @@ fun ScribeComposeTheme(
                                 ?.let { (it as? coil3.BitmapImage)?.bitmap }
                             bmp?.let {
                                 val radiusPx = (blurIntensity * 0.8f).toInt().coerceIn(1, 25)
-                                com.primaloptima.scribe.util.BitmapBlur.blurBitmap(context, it, radiusPx)
+                                com.primaloptima.scribe.util.BitmapBlur.blurBitmap(it, radiusPx)
                             }
                         } catch (_: Exception) { null }
                     }
