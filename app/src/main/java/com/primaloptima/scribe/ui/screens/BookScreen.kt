@@ -69,6 +69,7 @@ fun BookScreen(
     val notes by vm.notes.observeAsState(emptyList())
     val folders by vm.folders.observeAsState(emptyList())
     val viewMode by vm.viewMode.observeAsState(BookViewModel.ViewMode.LIST)
+    val sortMode by vm.sortMode.observeAsState(BookViewModel.SortMode.DATE_UPDATED)
 
     // Bottom Bar tab state inside BookScreen: 0: Write, 1: Statistics
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -302,6 +303,7 @@ fun BookScreen(
                                     }
                                     SmallFloatingActionButton(
                                         onClick = {
+                                        shape = CircleShape,
                                             isFabExpanded = false
                                             showCreateNoteDialog = true
                                         },
@@ -337,6 +339,7 @@ fun BookScreen(
                                     }
                                     SmallFloatingActionButton(
                                         onClick = {
+                                        shape = CircleShape,
                                             isFabExpanded = false
                                             showCreateFolderDialog = true
                                         },
@@ -360,6 +363,7 @@ fun BookScreen(
 
                         FloatingActionButton(
                             onClick = { isFabExpanded = !isFabExpanded },
+                            shape = CircleShape,
                             containerColor = frostedContainerColor(
                                 fallback = MaterialTheme.colorScheme.primary
                             ),
@@ -455,7 +459,7 @@ fun BookScreen(
                                         verticalArrangement = Arrangement.spacedBy(8.dp),
                                         modifier = Modifier.fillMaxSize()
                                     ) {
-                                        items(pageNotes, key = { it.id }) { note ->
+                                        items(pageNotes, key = { note -> "${sortMode}_${note.id}" }) { note ->
                                             NoteListRow(
                                                 note = note,
                                                 onClick = {

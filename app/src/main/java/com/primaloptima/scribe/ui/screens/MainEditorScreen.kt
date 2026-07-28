@@ -44,6 +44,7 @@ import com.primaloptima.scribe.ui.theme.frostedFab
 import com.primaloptima.scribe.ui.theme.frostedPanel
 import com.primaloptima.scribe.ui.theme.FrostedDialog
 import com.primaloptima.scribe.ui.theme.frostedContainerColor
+import com.primaloptima.scribe.ui.theme.frostedCard
 import com.primaloptima.scribe.ui.theme.rememberAdaptiveTextColor
 import com.primaloptima.scribe.ui.util.rememberKeyboardVisibility
 import dev.chrisbanes.haze.hazeSource
@@ -696,8 +697,8 @@ fun MainEditorScreen(
                                             modifier = Modifier
                                                 .weight(1f)
                                                 .fillMaxWidth()
-                                                .clip(RoundedCornerShape(12.dp))
-                                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                                .frostedCard(LocalHazeState.current, RoundedCornerShape(12.dp),
+                                                    applyFallbackBackground = true)
                                         ) {
                                             val currentTopId = pinnedTopNotes.getOrNull(pinnedTopIndex)
                                             val currentTopNote = remember(currentTopId, allNotes, worldEntries) {
@@ -794,8 +795,8 @@ fun MainEditorScreen(
                                             modifier = Modifier
                                                 .weight(1f)
                                                 .fillMaxWidth()
-                                                .clip(RoundedCornerShape(12.dp))
-                                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                                .frostedCard(LocalHazeState.current, RoundedCornerShape(12.dp),
+                                                    applyFallbackBackground = true)
                                         ) {
                                             val currentBottomId = pinnedBottomNotes.getOrNull(pinnedBottomIndex)
                                             val currentBottomNote = remember(currentBottomId, allNotes, worldEntries) {
@@ -1097,7 +1098,7 @@ fun MainEditorScreen(
                             bottomBar = {
                                 val isKeyboardVisible = rememberKeyboardVisibility()
                                 AnimatedVisibility(
-                                    visible = !zenMode && isKeyboardVisible,
+                                    visible = isKeyboardVisible,
                                     enter = slideInVertically(initialOffsetY = { it }),
                                     exit = slideOutVertically(targetOffsetY = { it })
                                 ) {
@@ -1314,6 +1315,7 @@ fun MainEditorScreen(
                                 if (zenMode) {
                                     FloatingActionButton(
                                         onClick = { editorVm.setZen(false) },
+                                        shape = CircleShape,
                                         containerColor = frostedContainerColor(
                                             fallback = MaterialTheme.colorScheme.primaryContainer
                                         ),

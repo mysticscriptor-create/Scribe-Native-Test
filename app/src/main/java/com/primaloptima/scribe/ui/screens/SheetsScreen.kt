@@ -84,6 +84,7 @@ fun SheetsScreen(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = { showCreateDialog = true },
+                shape = CircleShape,
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier.frostedFab(LocalHazeState.current)
