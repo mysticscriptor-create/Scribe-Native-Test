@@ -117,7 +117,7 @@ fun Modifier.frostedFab(hazeState: HazeState?): Modifier {
     val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
             (theme.bgMode == "image" || theme.bgMode == "blurred")
     return if (!hasBgImage || hazeState == null) {
-        if (applyFallbackBackground) this.clip(shape).background(solidSurface.copy(alpha = solidAlpha)) else this
+        this
     } else if (blurAllowed) {
         this
             .clip(androidx.compose.foundation.shape.CircleShape)
