@@ -94,8 +94,9 @@ fun HomeScreen(
         LaunchedEffect(drawerState.currentValue, drawerState.targetValue) {
             if (drawerState.targetValue == DrawerValue.Open && !captured) {
                 captured = true
+                val raw = BitmapBlur.captureOnly(view)  // must stay on Main thread
                 oneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    BitmapBlur.captureAndBlur(view, radius = 15)
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
                 }
             } else if (drawerState.currentValue == DrawerValue.Closed) {
                 captured = false

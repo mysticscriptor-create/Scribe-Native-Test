@@ -114,8 +114,9 @@ fun MainEditorScreen(
         LaunchedEffect(leftDrawerState.currentValue, leftDrawerState.targetValue) {
             if (leftDrawerState.targetValue == DrawerValue.Open && !leftCaptured) {
                 leftCaptured = true
+                val raw = BitmapBlur.captureOnly(view)  // must stay on Main thread
                 leftOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    BitmapBlur.captureAndBlur(view, radius = 15)
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
                 }
             } else if (leftDrawerState.currentValue == DrawerValue.Closed) {
                 leftCaptured = false
@@ -125,8 +126,9 @@ fun MainEditorScreen(
         LaunchedEffect(rightDrawerState.currentValue, rightDrawerState.targetValue) {
             if (rightDrawerState.targetValue == DrawerValue.Open && !rightCaptured) {
                 rightCaptured = true
+                val rawRight = BitmapBlur.captureOnly(view)  // must stay on Main thread
                 rightOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    BitmapBlur.captureAndBlur(view, radius = 15)
+                    rawRight?.let { BitmapBlur.blurBitmap(it, radius = 15) }
                 }
             } else if (rightDrawerState.currentValue == DrawerValue.Closed) {
                 rightCaptured = false
