@@ -72,7 +72,7 @@ object BitmapBlur {
             val r = radius.coerceIn(1, 25)
 
             // Capture the whole window into a software bitmap
-            val full = captureView(view) ?: return null
+            val full = captureOnly(view) ?: return null
 
             // Crop to the desired region
             val cropped = if (cropRect != null) {
@@ -121,9 +121,10 @@ object BitmapBlur {
 
     /**
      * Captures the given view's root window into a software Bitmap.
-     * Uses PixelCopy on API 26+ for accuracy; falls back to Canvas draw on older.
+     * Must be called on the MAIN thread (View drawing is not thread-safe).
+     * After capturing, pass the result to [blurBitmap] on a background thread.
      */
-    private fun captureView(view: View): Bitmap? {
+    fun captureOnly(view: View): Bitmap? {
         return try {
             val w = view.rootView.width.coerceAtLeast(1)
             val h = view.rootView.height.coerceAtLeast(1)
