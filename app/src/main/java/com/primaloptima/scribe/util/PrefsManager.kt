@@ -156,6 +156,18 @@ class PrefsManager(context: Context) {
         get()    = prefs.getInt(KEY_AUTO_HISTORY_MIN_WORDS, 10)
         set(v)   = prefs.edit().putInt(KEY_AUTO_HISTORY_MIN_WORDS, v.coerceIn(1, 200)).apply()
 
+
+    // ── History snapshots (legacy – keeps HistoryManager working) ─────────────────
+
+    fun getSnapshotsJson(noteId: String): String =
+        prefs.getString("$KEY_HISTORY_PREFIX$noteId", "[]") ?: "[]"
+
+    fun setSnapshotsJson(noteId: String, json: String) =
+        prefs.edit().putString("$KEY_HISTORY_PREFIX$noteId", json).apply()
+
+    fun clearSnapshots(noteId: String) =
+        prefs.edit().remove("$KEY_HISTORY_PREFIX$noteId").apply()
+
     // ── Recovery buffer ───────────────────────────────────────────────────────
 
     fun getRecovery(noteId: String): String? =
@@ -191,6 +203,7 @@ class PrefsManager(context: Context) {
         private const val KEY_AUTO_HISTORY_SLOTS          = "scribe.autoHistorySlots.v1"
         private const val KEY_MANUAL_CHECKPOINT_SLOTS     = "scribe.manualCheckpointSlots.v1"
         private const val KEY_AUTO_HISTORY_MIN_WORDS      = "scribe.autoHistoryMinWords.v1"
+        private const val KEY_HISTORY_PREFIX              = "scribe.history."
         private const val KEY_RECOVERY_PREFIX             = "scribe.recovery."
     }
 }
