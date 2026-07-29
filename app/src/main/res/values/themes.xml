@@ -20,9 +20,8 @@
         <!-- Error -->
         <item name="colorError">@color/md_theme_light_error</item>
         <item name="colorOnError">@color/md_theme_light_onError</item>
-        <!-- Window -->
+        <!-- Window — bar colors are controlled by enableEdgeToEdge() + ScribeTheme SideEffect -->
         <item name="android:windowSoftInputMode">adjustResize</item>
-        <item name="android:statusBarColor">@color/md_theme_light_primary</item>
     </style>
 
     <!-- Launch screen while Room initialises -->
