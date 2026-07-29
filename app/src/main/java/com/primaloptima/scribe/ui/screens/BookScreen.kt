@@ -195,6 +195,7 @@ fun BookScreen(
         Scaffold(
             containerColor = Color.Transparent,
             modifier = Modifier.then(swipeGestureModifier),
+            contentWindowInsets = WindowInsets.systemBars,
             topBar = {
                 TopAppBar(
                     colors = TopAppBarDefaults.topAppBarColors(

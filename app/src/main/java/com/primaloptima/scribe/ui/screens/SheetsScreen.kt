@@ -71,6 +71,7 @@ fun SheetsScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
         topBar = {
             TopAppBar(
                 title = { Text("World Building Sheets", fontWeight = FontWeight.Bold) },

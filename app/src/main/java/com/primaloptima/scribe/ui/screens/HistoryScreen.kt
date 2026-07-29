@@ -69,6 +69,7 @@ fun HistoryScreen(
     var showConfirmRestoreDialog by remember { mutableStateOf(false) }
 
     Scaffold(
+        contentWindowInsets = WindowInsets.systemBars,
         topBar = {
             TopAppBar(
                 title = { Text("Version History", fontWeight = FontWeight.Bold) },

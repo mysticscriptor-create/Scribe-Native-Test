@@ -1008,6 +1008,7 @@ fun MainEditorScreen(
                         Scaffold(
                             containerColor = Color.Transparent,
                             modifier = Modifier.then(swipeGestureModifier),
+                            contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
                             topBar = {
                                 if (!zenMode) {
                                     Column {

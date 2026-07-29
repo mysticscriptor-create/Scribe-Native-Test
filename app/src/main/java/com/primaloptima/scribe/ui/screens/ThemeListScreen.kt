@@ -72,6 +72,7 @@ fun ThemeListScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets.systemBars,
         topBar = {
             TopAppBar(
                 title = { Text("Themes", fontWeight = FontWeight.Bold) },

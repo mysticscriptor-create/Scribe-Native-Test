@@ -40,6 +40,7 @@ fun ShortcutsScreen(
     var shortcutToDelete by remember { mutableStateOf<ShortcutAction?>(null) }
 
     Scaffold(
+        contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
         topBar = {
             TopAppBar(
                 title = { Text("Shortcuts", fontWeight = FontWeight.Bold) },

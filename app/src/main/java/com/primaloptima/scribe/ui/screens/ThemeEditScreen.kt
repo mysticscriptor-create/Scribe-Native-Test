@@ -114,6 +114,7 @@ fun ThemeEditScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
         topBar = {
             TopAppBar(
                 title = {

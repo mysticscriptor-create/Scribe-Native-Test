@@ -18,6 +18,7 @@ fun GuideScreen(
     onBack: () -> Unit
 ) {
     Scaffold(
+        contentWindowInsets = WindowInsets.systemBars,
         topBar = {
             TopAppBar(
                 title = { Text("User Guide", fontWeight = FontWeight.Bold) },
