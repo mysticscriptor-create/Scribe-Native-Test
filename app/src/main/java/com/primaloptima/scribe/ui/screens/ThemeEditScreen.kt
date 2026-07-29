@@ -67,8 +67,6 @@ fun ThemeEditScreen(
 ) {
     val context = LocalContext.current
     val themes by vm.themes.observeAsState(emptyList())
-    val prefsManager = remember { com.primaloptima.scribe.util.PrefsManager(context) }
-    var legacyBlurEnabled by remember { mutableStateOf(prefsManager.legacyBlurEnabled) }
 
     val originalTheme = remember(themes, themeId) {
         themes.firstOrNull { it.id == themeId } ?: DefaultThemes.all.first()
@@ -83,6 +81,7 @@ fun ThemeEditScreen(
     var bgUri by remember(originalTheme) { mutableStateOf(originalTheme.backgroundImageUri) }
     var bgOpacity by remember(originalTheme) { mutableFloatStateOf(originalTheme.backgroundImageOpacity ?: 0.35f) }
     var blurIntensity by remember(originalTheme) { mutableFloatStateOf(originalTheme.blurIntensity) }
+    var frostedGlassEnabled by remember(originalTheme) { mutableStateOf(originalTheme.frostedGlassEnabled) }
 
     var fontFamily by remember(originalTheme) { mutableStateOf(originalTheme.fontFamily) }
     var fontSize by remember(originalTheme) { mutableFloatStateOf(originalTheme.fontSize.toFloat()) }
@@ -141,6 +140,7 @@ fun ThemeEditScreen(
                             backgroundImageOpacity = bgOpacity,
                             bgMode = bgMode,
                             blurIntensity = blurIntensity,
+                            frostedGlassEnabled = frostedGlassEnabled,
                             textAlignment = textAlignment,
                             themeScope = themeScope,
                             emoji = emoji,
@@ -203,44 +203,57 @@ fun ThemeEditScreen(
                         modifier = Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text("Background Mode", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Text("Background Image", fontWeight = FontWeight.Bold, fontSize = 15.sp)
 
-                        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                            val modes = listOf("color" to "Color", "image" to "Image", "blurred" to "Blurred")
-                            modes.forEachIndexed { index, (modeKey, label) ->
-                                SegmentedButton(
-                                    selected = bgMode == modeKey,
-                                    onClick = {
-                                        bgMode = modeKey
-                                        if ((modeKey == "image" || modeKey == "blurred") && bgUri.isNullOrEmpty()) {
-                                            bgImagePicker.launch("image/*")
-                                        }
-                                    },
-                                    shape = SegmentedButtonDefaults.itemShape(index = index, count = modes.size)
-                                ) {
-                                    Text(label)
+                        // Image picker row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Button(onClick = { bgImagePicker.launch("image/*") }) {
+                                Icon(Icons.Default.Image, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(if (bgUri.isNullOrEmpty()) "Pick Image" else "Change Image")
+                            }
+                            if (!bgUri.isNullOrEmpty()) {
+                                TextButton(onClick = {
+                                    bgUri = null
+                                    bgMode = "color"
+                                }) {
+                                    Text("Remove", color = MaterialTheme.colorScheme.error)
                                 }
                             }
                         }
 
-                        if (bgMode == "image" || bgMode == "blurred") {
+                        // Image-specific settings (only when an image is set)
+                        if (!bgUri.isNullOrEmpty()) {
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+
+                            // Blur background toggle
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Button(onClick = { bgImagePicker.launch("image/*") }) {
-                                    Icon(Icons.Default.Image, contentDescription = null)
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(if (bgUri.isNullOrEmpty()) "Pick Image" else "Change Image")
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Blur Background", fontWeight = FontWeight.Medium)
+                                    Text(
+                                        "Soften the image with a blur effect",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                    )
                                 }
-                                if (!bgUri.isNullOrEmpty()) {
-                                    TextButton(onClick = { bgUri = null }) {
-                                        Text("Remove", color = MaterialTheme.colorScheme.error)
+                                Spacer(Modifier.width(12.dp))
+                                Switch(
+                                    checked = bgMode == "blurred",
+                                    onCheckedChange = { blur ->
+                                        bgMode = if (blur) "blurred" else "image"
                                     }
-                                }
+                                )
                             }
 
+                            // Blur intensity slider — only when blur is on
                             if (bgMode == "blurred") {
                                 Text(
                                     "Blur Intensity: ${blurIntensity.toInt()} dp",
@@ -253,6 +266,7 @@ fun ThemeEditScreen(
                                 )
                             }
 
+                            // Overlay opacity
                             Text(
                                 "Overlay Opacity: ${(bgOpacity * 100).toInt()}%",
                                 fontWeight = FontWeight.Medium
@@ -263,36 +277,27 @@ fun ThemeEditScreen(
                                 valueRange = 0.0f..0.90f
                             )
 
-                            // Only shown on Android 11 and below
-                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-                                Spacer(Modifier.height(8.dp))
-                                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            "CPU Blur (Legacy)",
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        Text(
-                                            "Enables frosted glass on Android 11 and below via " +
-                                            "RenderScript. May cause lag during animations.",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.error
-                                        )
-                                    }
-                                    Spacer(Modifier.width(12.dp))
-                                    Switch(
-                                        checked = legacyBlurEnabled,
-                                        onCheckedChange = { enabled ->
-                                            legacyBlurEnabled = enabled
-                                            prefsManager.legacyBlurEnabled = enabled
-                                        }
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+
+                            // Frosted glass toggle
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Frosted Glass", fontWeight = FontWeight.Medium)
+                                    Text(
+                                        "Apply glass morphism to bars, drawers, and cards",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                                     )
                                 }
+                                Spacer(Modifier.width(12.dp))
+                                Switch(
+                                    checked = frostedGlassEnabled,
+                                    onCheckedChange = { frostedGlassEnabled = it }
+                                )
                             }
                         }
                     }
@@ -542,6 +547,7 @@ fun ThemeEditScreen(
                         backgroundImageOpacity = bgOpacity,
                         bgMode = bgMode,
                         blurIntensity = blurIntensity,
+                        frostedGlassEnabled = frostedGlassEnabled,
                         textAlignment = textAlignment,
                         themeScope = themeScope,
                         emoji = emoji,
@@ -589,6 +595,7 @@ fun ThemeEditScreen(
                                 backgroundImageOpacity = bgOpacity,
                                 bgMode = bgMode,
                                 blurIntensity = blurIntensity,
+                                frostedGlassEnabled = frostedGlassEnabled,
                                 textAlignment = textAlignment,
                                 themeScope = themeScope,
                                 emoji = emoji,
