@@ -57,13 +57,6 @@ data class OutlineEntry(
     val preview: String? = null
 )
 
-// ── History snapshot ──────────────────────────────────────────────────────────
-
-data class HistorySnapshot(
-    val content: String,
-    val savedAt: Long
-)
-
 // ── App theme ─────────────────────────────────────────────────────────────────
 
 data class ThemeColors(
