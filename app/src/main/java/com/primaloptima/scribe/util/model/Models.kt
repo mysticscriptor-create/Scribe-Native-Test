@@ -120,3 +120,10 @@ data class SafScanResult(
     val folders: List<SafFolder> = emptyList(),
     val covers: List<SafCover> = emptyList()
 )
+
+// ── History snapshot (SharedPreferences-backed legacy history) ────────────────
+
+data class HistorySnapshot(
+    val content: String,
+    val savedAt: Long
+)
