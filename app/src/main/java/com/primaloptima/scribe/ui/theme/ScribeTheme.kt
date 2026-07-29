@@ -636,10 +636,24 @@ fun ScribeComposeTheme(
                 val blurIntensity = resolvedTheme.blurIntensity
 
                 // On API < 31 we can't use RenderEffect on a live composable, so we
-                // On API < 31 we pre-blur the source bitmap once using pure Kotlin
-                // stack blur and display that pre-blurred bitmap instead.
+                // pre-blur the source bitmap once using pure Kotlin stack blur and
+                // display that pre-blurred bitmap instead.
+                //
+                // Even for bgMode == "image" (no blur), we must load with
+                // allowHardware(false) on API < 31 so that BitmapBlur.captureOnly
+                // can draw the view onto a software Canvas without crashing.
+                // Hardware bitmaps throw an exception when drawn onto a software Canvas,
+                // which captureOnly silently catches → returns null → frosted glass falls
+                // back to solid. By keeping the background image as a software bitmap
+                // the capture succeeds and one-shot blur works correctly.
                 val needsSoftwareBlur = bgMode == "blurred" &&
                         blurIntensity > 0f &&
+                        Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&
+                        bgUri != null
+
+                // For bgMode == "image" on API < 31 we still need a software bitmap
+                // (no blur) so captureOnly can read the view hierarchy.
+                val needsSoftwareImage = bgMode == "image" &&
                         Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&
                         bgUri != null
 
@@ -673,18 +687,47 @@ fun ScribeComposeTheme(
                     }
                 }
 
+                // Software (non-blurred) image for bgMode == "image" on API < 31
+                val softwareImageModel by produceState<android.graphics.Bitmap?>(
+                    initialValue = null,
+                    key1 = bgUri,
+                    key2 = needsSoftwareImage
+                ) {
+                    if (!needsSoftwareImage || bgUri == null) {
+                        value = null
+                        return@produceState
+                    }
+                    value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        try {
+                            val loader = coil3.ImageLoader(context)
+                            val req = coil3.request.ImageRequest.Builder(context)
+                                .data(bgUri)
+                                .size(coil3.size.Size(1080, 1920))
+                                .allowHardware(false)
+                                .build()
+                            val result = loader.execute(req)
+                            (result as? coil3.request.SuccessResult)
+                                ?.image
+                                ?.let { (it as? coil3.BitmapImage)?.bitmap }
+                        } catch (_: Exception) { null }
+                    }
+                }
+
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(if (showWholeAppBg) Color.Transparent else animBg)
                 ) {
                     if (showWholeAppBg) {
-                        // Display either the pre-blurred bitmap (API < 31) or the
-                        // live image with RenderEffect (API 31+)
-                        val imageModel = if (needsSoftwareBlur && softwareBlurredModel != null) {
-                            softwareBlurredModel
-                        } else {
-                            bgUri
+                        // Pick the right image model:
+                        // • API < 31 + blurred mode → pre-blurred software bitmap
+                        // • API < 31 + image mode  → software bitmap (no blur, but
+                        //   allowHardware=false so captureOnly can draw the view)
+                        // • API 31+ or no pre-processing needed → raw URI (Haze handles blur)
+                        val imageModel = when {
+                            needsSoftwareBlur && softwareBlurredModel != null -> softwareBlurredModel
+                            needsSoftwareImage && softwareImageModel != null -> softwareImageModel
+                            else -> bgUri
                         }
                         AsyncImage(
                             model = imageModel,
