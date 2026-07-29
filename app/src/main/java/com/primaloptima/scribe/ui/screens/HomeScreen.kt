@@ -93,6 +93,27 @@ fun HomeScreen(
     val view = LocalView.current
     var oneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var captured by remember { mutableStateOf(false) }
+
+    // Persistent blur bitmap for top/bottom bars on Android 10.
+    // Bars are always visible so we can't capture "just before" they appear.
+    // Instead we capture once after the background image has had time to render
+    // (a short delay lets AsyncImage finish its first draw), then reuse it.
+    // Keyed on the background URI so it refreshes whenever the theme changes.
+    val appTheme = LocalAppTheme.current
+    val bgUri = appTheme?.backgroundImageUri
+    var barBlurBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        LaunchedEffect(bgUri) {
+            barBlurBitmap = null          // clear stale bitmap on theme change
+            if (!bgUri.isNullOrEmpty()) {
+                kotlinx.coroutines.delay(150) // wait for AsyncImage first draw
+                val raw = BitmapBlur.captureOnly(view)
+                barBlurBitmap = withContext(Dispatchers.IO) {
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                }
+            }
+        }
+    }
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
         LaunchedEffect(drawerState.currentValue, drawerState.targetValue) {
             if (drawerState.targetValue == DrawerValue.Open && !captured) {
@@ -157,25 +178,40 @@ fun HomeScreen(
     var bookToDelete by remember { mutableStateOf<Book?>(null) }
     var bookToChangeCover by remember { mutableStateOf<Book?>(null) }
 
-    // One-shot capture for dialogs on pre-API-31 devices
-    // Placed here so all dialog state vars above are already in scope
+    // One-shot capture for dialogs on pre-API-31 devices.
+    //
+    // KEY FIX: FrostedDialog is an inline Box composable (not a system Dialog/Popup
+    // window), so it renders in the SAME recomposition frame that sets showXxx = true.
+    // LaunchedEffect fires AFTER layout+draw, meaning captureOnly was capturing the
+    // screen *after* the white dialog was already painted — blurring a white rectangle.
+    //
+    // Solution: capture BEFORE setting the show-flag. captureForDialog() runs the
+    // capture on the current coroutine (Main dispatcher via LaunchedEffect/scope.launch
+    // which both default to Main), stores the bitmap, then sets the flag so the dialog
+    // composable first renders with a valid blur behind it.
     var dialogOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var dialogCaptured by remember { mutableStateOf(false) }
+
+    // Clears the bitmap when all dialogs close so the next open gets a fresh capture.
+    val anyDialogOpen = showCreateDialog || bookToRename != null ||
+            bookToDelete != null || bookToChangeCover != null
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-        val anyDialogOpen = showCreateDialog || bookToRename != null ||
-                bookToDelete != null || bookToChangeCover != null
         LaunchedEffect(anyDialogOpen) {
-            if (anyDialogOpen && !dialogCaptured) {
-                dialogCaptured = true
-                val raw = BitmapBlur.captureOnly(view)
-                dialogOneShotBitmap = withContext(Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
-                }
-            } else if (!anyDialogOpen) {
-                dialogCaptured = false
-                dialogOneShotBitmap = null
+            if (!anyDialogOpen) dialogOneShotBitmap = null
+        }
+    }
+
+    // Helper: capture → blur → store, then execute the lambda that opens the dialog.
+    // All of this happens before the dialog composable ever enters the tree.
+    val captureForDialog: suspend (() -> Unit) -> Unit = { openDialog ->
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            // captureOnly uses view.rootView.draw() which requires the Main thread.
+            // scope.launch / LaunchedEffect both run on Main by default, so this is safe.
+            val raw = BitmapBlur.captureOnly(view)
+            dialogOneShotBitmap = withContext(Dispatchers.IO) {
+                raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
             }
         }
+        openDialog()   // NOW set the flag — dialog renders with bitmap already in place
     }
 
     val coverPickerLauncher = rememberLauncherForActivityResult(
@@ -289,6 +325,9 @@ fun HomeScreen(
             containerColor = Color.Transparent,
             modifier = Modifier.then(swipeGestureModifier),
             topBar = {
+                // On API < 31 frostedBar needs LocalOneShotBitmap to be non-null.
+                // Provide the persistent barBlurBitmap captured at screen-load time.
+                CompositionLocalProvider(LocalOneShotBitmap provides barBlurBitmap) {
                 TopAppBar(
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = Color.Transparent
@@ -409,8 +448,10 @@ fun HomeScreen(
                         }
                     }
                 )
+                } // end CompositionLocalProvider(barBlurBitmap for topBar)
             },
             bottomBar = {
+                CompositionLocalProvider(LocalOneShotBitmap provides barBlurBitmap) {
                 NavigationBar(
                     containerColor = Color.Transparent,
                     tonalElevation = 0.dp,
@@ -460,8 +501,12 @@ fun HomeScreen(
                         colors = navColors
                     )
                 }
+                } // end CompositionLocalProvider(barBlurBitmap for bottomBar)
             },
             floatingActionButton = {
+                // FAB is always visible — use the persistent bar bitmap (not the
+                // dialog bitmap, which is only set while a dialog is open).
+                CompositionLocalProvider(LocalOneShotBitmap provides barBlurBitmap) {
                 val fabTheme = LocalAppTheme.current
                 val accentClr = fabTheme?.let {
                     parseComposeColor(it.colors.accent, MaterialTheme.colorScheme.primary)
@@ -477,7 +522,7 @@ fun HomeScreen(
                 ) { tab ->
                     when (tab) {
                         0 -> FloatingActionButton(
-                            onClick = { showCreateDialog = true },
+                            onClick = { scope.launch { captureForDialog { showCreateDialog = true } } },
                             containerColor = frostedContainerColor(fallback = accentClr),
                             contentColor = Color.White,
                             shape = RoundedCornerShape(16.dp),
@@ -505,6 +550,7 @@ fun HomeScreen(
                         else -> Box(Modifier)
                     }
                 }
+                } // end CompositionLocalProvider(barBlurBitmap for FAB)
             }
         ) { padding ->
             Box(
@@ -542,12 +588,12 @@ fun HomeScreen(
                                 folderCounts = bookFolderCounts,
                                 allNotes = allNotes,
                                 onOpen = onOpenBook,
-                                onRename = { bookToRename = it },
+                                onRename = { book -> scope.launch { captureForDialog { bookToRename = book } } },
                                 onChangeCover = {
                                     bookToChangeCover = it
                                     coverPickerLauncher.launch("image/*")
                                 },
-                                onDelete = { bookToDelete = it }
+                                onDelete = { book -> scope.launch { captureForDialog { bookToDelete = book } } }
                             )
                             1 -> NotesTabContent(
                                 allNotes = allNotes,

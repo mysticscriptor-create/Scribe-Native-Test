@@ -49,6 +49,7 @@ import com.primaloptima.scribe.ui.theme.FrostedDialog
 import com.primaloptima.scribe.ui.theme.frostedContainerColor
 import com.primaloptima.scribe.ui.theme.frostedCard
 import com.primaloptima.scribe.ui.theme.rememberAdaptiveTextColor
+import com.primaloptima.scribe.ui.theme.LocalAppTheme
 import com.primaloptima.scribe.util.BitmapBlur
 import androidx.compose.ui.platform.LocalView
 import com.primaloptima.scribe.ui.util.rememberKeyboardVisibility
@@ -111,7 +112,26 @@ fun MainEditorScreen(
     var leftCaptured by remember { mutableStateOf(false) }
     var rightCaptured by remember { mutableStateOf(false) }
     var dialogOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var dialogCaptured by remember { mutableStateOf(false) }
+
+    // Persistent blur bitmap for always-visible bars and FABs on Android 10.
+    // Captured once after the background image has rendered (150ms delay),
+    // and refreshed whenever the theme/background changes.
+    var barBlurBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    val editorTheme = LocalAppTheme.current
+    val editorBgUri = editorTheme?.backgroundImageUri
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        LaunchedEffect(editorBgUri) {
+            barBlurBitmap = null
+            if (!editorBgUri.isNullOrEmpty()) {
+                kotlinx.coroutines.delay(150)
+                val raw = BitmapBlur.captureOnly(view)
+                barBlurBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                }
+            }
+        }
+    }
+
 
     // Trigger capture when drawers start sliding open (pre-API-31 only)
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
@@ -184,21 +204,24 @@ fun MainEditorScreen(
     var showCreateNoteDialog by remember { mutableStateOf(false) }
     var filePickerTargetSlot by remember { mutableStateOf<String?>(null) } // "top" or "bottom"
 
-    // Dialog capture — placed here so all three dialog state vars above are in scope
+    // Clear dialog bitmap when all dialogs close.
+    val anyDialogOpen = showRenameDialog || showCreateNoteDialog || filePickerTargetSlot != null
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-        val anyDialogOpen = showRenameDialog || showCreateNoteDialog || filePickerTargetSlot != null
         LaunchedEffect(anyDialogOpen) {
-            if (anyDialogOpen && !dialogCaptured) {
-                dialogCaptured = true
-                val raw = BitmapBlur.captureOnly(view)
-                dialogOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
-                }
-            } else if (!anyDialogOpen) {
-                dialogCaptured = false
-                dialogOneShotBitmap = null
+            if (!anyDialogOpen) dialogOneShotBitmap = null
+        }
+    }
+
+    // KEY FIX: capture BEFORE setting the show flag so FrostedDialog's first
+    // composition already has a valid blur bitmap behind it.
+    val captureForDialog: suspend (() -> Unit) -> Unit = { openDialog ->
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            val raw = BitmapBlur.captureOnly(view)
+            dialogOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
             }
         }
+        openDialog()
     }
 
     var editorRef by remember { mutableStateOf<ScribeEditText?>(null) }
@@ -779,7 +802,7 @@ fun MainEditorScreen(
                                                 Column(
                                                     modifier = Modifier
                                                         .fillMaxSize()
-                                                        .clickable { filePickerTargetSlot = "top" },
+                                                        .clickable { scope.launch { captureForDialog { filePickerTargetSlot = "top" } } },
                                                     horizontalAlignment = Alignment.CenterHorizontally,
                                                     verticalArrangement = Arrangement.Center
                                                 ) {
@@ -842,7 +865,7 @@ fun MainEditorScreen(
                                                             Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Next", modifier = Modifier.size(16.dp))
                                                         }
                                                     }
-                                                    IconButton(onClick = { filePickerTargetSlot = "top" }, modifier = Modifier.size(24.dp)) {
+                                                    IconButton(onClick = { scope.launch { captureForDialog { filePickerTargetSlot = "top" } } }, modifier = Modifier.size(24.dp)) {
                                                         Icon(Icons.Default.SwapHoriz, contentDescription = "Switch Note", modifier = Modifier.size(16.dp))
                                                     }
                                                     IconButton(onClick = { editorVm.loadNote(currentTopNote.id) }, modifier = Modifier.size(24.dp)) {
@@ -877,7 +900,7 @@ fun MainEditorScreen(
                                                 Column(
                                                     modifier = Modifier
                                                         .fillMaxSize()
-                                                        .clickable { filePickerTargetSlot = "bottom" },
+                                                        .clickable { scope.launch { captureForDialog { filePickerTargetSlot = "bottom" } } },
                                                     horizontalAlignment = Alignment.CenterHorizontally,
                                                     verticalArrangement = Arrangement.Center
                                                 ) {
@@ -940,7 +963,7 @@ fun MainEditorScreen(
                                                             Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Next", modifier = Modifier.size(16.dp))
                                                         }
                                                     }
-                                                    IconButton(onClick = { filePickerTargetSlot = "bottom" }, modifier = Modifier.size(24.dp)) {
+                                                    IconButton(onClick = { scope.launch { captureForDialog { filePickerTargetSlot = "bottom" } } }, modifier = Modifier.size(24.dp)) {
                                                         Icon(Icons.Default.SwapHoriz, contentDescription = "Switch Note", modifier = Modifier.size(16.dp))
                                                     }
                                                     IconButton(onClick = { editorVm.loadNote(currentBottomNote.id) }, modifier = Modifier.size(24.dp)) {
@@ -1032,6 +1055,7 @@ fun MainEditorScreen(
                             modifier = Modifier.then(swipeGestureModifier),
                             contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
                             topBar = {
+                                CompositionLocalProvider(LocalOneShotBitmap provides barBlurBitmap) {
                                 if (!zenMode) {
                                     Column {
                                         TopAppBar(
@@ -1059,7 +1083,7 @@ fun MainEditorScreen(
                                                     overflow = TextOverflow.Ellipsis,
                                                     color = titleColor,
                                                     modifier = titleModifier.clickable {
-                                                        if (activeNote != null) showRenameDialog = true
+                                                        if (activeNote != null) scope.launch { captureForDialog { showRenameDialog = true } }
                                                     }
                                                 )
                                             },
@@ -1167,8 +1191,10 @@ fun MainEditorScreen(
                                         )
                                     }
                                 }
+                                } // end CompositionLocalProvider(barBlurBitmap for topBar)
                             },
                             bottomBar = {
+                                CompositionLocalProvider(LocalOneShotBitmap provides barBlurBitmap) {
                                 val isKeyboardVisible = rememberKeyboardVisibility()
                                 AnimatedVisibility(
                                     visible = isKeyboardVisible,
@@ -1204,6 +1230,7 @@ fun MainEditorScreen(
                                         }
                                     }
                                 }
+                                } // end CompositionLocalProvider(barBlurBitmap for bottomBar)
                         ) { padding ->
                             Box(
                                 modifier = Modifier
@@ -1351,7 +1378,9 @@ fun MainEditorScreen(
                                             }
                                     )
 
-                                // Floating Word Count Pill
+                                // Floating Word Count Pill + Zen FAB — always visible,
+                                // so use barBlurBitmap (not dialogOneShotBitmap).
+                                CompositionLocalProvider(LocalOneShotBitmap provides barBlurBitmap) {
                                 Box(
                                     modifier = Modifier
                                         .align(Alignment.TopEnd)
@@ -1434,6 +1463,7 @@ fun MainEditorScreen(
                                         Icon(Icons.Default.FullscreenExit, contentDescription = "Exit Zen")
                                     }
                                 }
+                                } // end CompositionLocalProvider(barBlurBitmap for FABs)
                             } // end editor Box
                         }
                     }

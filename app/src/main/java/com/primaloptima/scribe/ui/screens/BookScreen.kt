@@ -76,21 +76,24 @@ fun BookScreen(
     var captured by remember { mutableStateOf(false) }
     var isFabExpanded by remember { mutableStateOf(false) }
 
-    // Dialog states declared early so dialogCaptured LaunchedEffect can reference them
+    // Dialog states declared early so captureForDialog can reference them
     var showCreateNoteDialog by remember { mutableStateOf(false) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
     var noteToRename by remember { mutableStateOf<Note?>(null) }
     var noteToDelete by remember { mutableStateOf<Note?>(null) }
 
     var dialogOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var dialogCaptured by remember { mutableStateOf(false) }
 
+    // Clear dialog bitmap when all dialogs close.
+    val anyDialogOpen = showCreateNoteDialog || showCreateFolderDialog ||
+            noteToRename != null || noteToDelete != null
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-        // Capture when FAB expands (FABs appear instantly, so capture on expand)
+        // FAB expanded: capture before the sub-FABs animate in (they are inline
+        // composables so they render the same frame isFabExpanded becomes true).
         LaunchedEffect(isFabExpanded) {
             if (isFabExpanded && !captured) {
                 captured = true
-                val raw = BitmapBlur.captureOnly(view)  // must stay on Main thread
+                val raw = BitmapBlur.captureOnly(view)  // Main thread (LaunchedEffect default)
                 oneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
                 }
@@ -99,23 +102,21 @@ fun BookScreen(
                 oneShotBitmap = null
             }
         }
-
-        // Separate capture for dialogs — keyed independently so closing the FAB
-        // (isFabExpanded = false) before a dialog opens doesn't clear the bitmap
-        val anyDialogOpen = showCreateNoteDialog || showCreateFolderDialog ||
-                noteToRename != null || noteToDelete != null
         LaunchedEffect(anyDialogOpen) {
-            if (anyDialogOpen && !dialogCaptured) {
-                dialogCaptured = true
-                val raw = BitmapBlur.captureOnly(view)
-                dialogOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
-                }
-            } else if (!anyDialogOpen) {
-                dialogCaptured = false
-                dialogOneShotBitmap = null
+            if (!anyDialogOpen) dialogOneShotBitmap = null
+        }
+    }
+
+    // KEY FIX: capture BEFORE setting the show flag so FrostedDialog's first
+    // composition already has a valid blur bitmap behind it.
+    val captureForDialog: suspend (() -> Unit) -> Unit = { openDialog ->
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            val raw = BitmapBlur.captureOnly(view)
+            dialogOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
             }
         }
+        openDialog()
     }
 
     val book by vm.book.observeAsState()
@@ -203,7 +204,7 @@ fun BookScreen(
 
                 Spacer(modifier = Modifier.weight(1f))
                 TextButton(
-                    onClick = { showCreateFolderDialog = true },
+                    onClick = { scope.launch { captureForDialog { showCreateFolderDialog = true } } },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp)
@@ -352,7 +353,7 @@ fun BookScreen(
                                     SmallFloatingActionButton(
                                         onClick = {
                                             isFabExpanded = false
-                                            showCreateNoteDialog = true
+                                            scope.launch { captureForDialog { showCreateNoteDialog = true } }
                                         },
                                         shape = CircleShape,
                                         containerColor = frostedContainerColor(
@@ -388,7 +389,7 @@ fun BookScreen(
                                     SmallFloatingActionButton(
                                         onClick = {
                                             isFabExpanded = false
-                                            showCreateFolderDialog = true
+                                            scope.launch { captureForDialog { showCreateFolderDialog = true } }
                                         },
                                         shape = CircleShape,
                                         containerColor = frostedContainerColor(
@@ -525,9 +526,9 @@ fun BookScreen(
                                                             .putExtra("openInFloat", true)
                                                     )
                                                 },
-                                                onRename = { noteToRename = note },
+                                                onRename = { scope.launch { captureForDialog { noteToRename = note } } },
                                                 onDuplicate = { vm.duplicateNote(note.id) },
-                                                onDelete = { noteToDelete = note }
+                                                onDelete = { scope.launch { captureForDialog { noteToDelete = note } } }
                                             )
                                         }
                                     }
@@ -554,9 +555,9 @@ fun BookScreen(
                                         .putExtra("openInFloat", true)
                                 )
                             },
-                            onRename = { note -> noteToRename = note },
+                            onRename = { note -> scope.launch { captureForDialog { noteToRename = note } } },
                             onDuplicate = { note -> vm.duplicateNote(note.id) },
-                            onDelete = { note -> noteToDelete = note }
+                            onDelete = { note -> scope.launch { captureForDialog { noteToDelete = note } } }
                         )
                     }
                 } else {
