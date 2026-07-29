@@ -53,7 +53,6 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.allowHardware
 import com.primaloptima.scribe.util.DefaultThemes
-import com.primaloptima.scribe.util.PrefsManager
 import com.primaloptima.scribe.util.ThemeDataStoreRepo
 import com.primaloptima.scribe.util.ThemeManager
 import com.primaloptima.scribe.util.model.AppTheme
@@ -74,8 +73,12 @@ val LocalHazeState = compositionLocalOf<HazeState?> { null }
 val LocalAppTheme = compositionLocalOf<AppTheme?> { null }
 val LocalBgAnalysisBitmap = compositionLocalOf<Bitmap?> { null }
 val LocalScreenSize = compositionLocalOf { Pair(1080f, 1920f) }
-/** True when the user has opted into CPU blur on pre-API-31 devices. */
-val LocalLegacyBlur = compositionLocalOf { false }
+/**
+ * True when the user has enabled the frosted glass effect for this theme.
+ * Controls whether bars, panels, cards, and FABs use hazeEffect / one-shot blur.
+ * When false all frosted modifiers fall back to a solid surface background.
+ */
+val LocalFrostedGlass = compositionLocalOf { true }
 
 /**
  * Holds the one-shot blurred screenshot bitmap captured just before a panel/dialog
@@ -102,8 +105,10 @@ fun Modifier.frostedBar(hazeState: HazeState?): Modifier {
     val theme = LocalAppTheme.current
     val solidSurface = LocalSolidSurface.current
     val oneShotBitmap = LocalOneShotBitmap.current
+    val frostedGlass = LocalFrostedGlass.current
     val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
-            (theme.bgMode == "image" || theme.bgMode == "blurred")
+            (theme.bgMode == "image" || theme.bgMode == "blurred") &&
+            frostedGlass
     return if (!hasBgImage) {
         this.background(solidSurface)
     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null) {
@@ -127,8 +132,10 @@ fun Modifier.frostedFab(hazeState: HazeState?): Modifier {
     val theme = LocalAppTheme.current
     val solidSurface = LocalSolidSurface.current
     val oneShotBitmap = LocalOneShotBitmap.current
+    val frostedGlass = LocalFrostedGlass.current
     val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
-            (theme.bgMode == "image" || theme.bgMode == "blurred")
+            (theme.bgMode == "image" || theme.bgMode == "blurred") &&
+            frostedGlass
     return if (!hasBgImage) {
         this
     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null) {
@@ -164,8 +171,10 @@ fun Modifier.frostedPanel(hazeState: HazeState?): Modifier {
     val theme = LocalAppTheme.current
     val solidSurface = LocalSolidSurface.current
     val oneShotBitmap = LocalOneShotBitmap.current
+    val frostedGlass = LocalFrostedGlass.current
     val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
-            (theme.bgMode == "image" || theme.bgMode == "blurred")
+            (theme.bgMode == "image" || theme.bgMode == "blurred") &&
+            frostedGlass
     return if (!hasBgImage) {
         this.background(solidSurface)
     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null) {
@@ -202,8 +211,10 @@ fun Modifier.frostedCard(
 ): Modifier {
     val theme = LocalAppTheme.current
     val solidSurface = LocalSolidSurface.current
+    val frostedGlass = LocalFrostedGlass.current
     val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
-            (theme.bgMode == "image" || theme.bgMode == "blurred")
+            (theme.bgMode == "image" || theme.bgMode == "blurred") &&
+            frostedGlass
     val oneShotBitmap = LocalOneShotBitmap.current
     return if (!hasBgImage || hazeState == null) {
         this
@@ -244,8 +255,10 @@ fun FrostedDialog(
     val solidSurface = LocalSolidSurface.current
     val oneShotBitmap = LocalOneShotBitmap.current
     val theme = LocalAppTheme.current
+    val frostedGlass = LocalFrostedGlass.current
     val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
-            (theme.bgMode == "image" || theme.bgMode == "blurred")
+            (theme.bgMode == "image" || theme.bgMode == "blurred") &&
+            frostedGlass
     val shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp)
 
     Box(
@@ -322,8 +335,10 @@ fun frostedContainerColor(fallback: Color): Color {
     val theme = LocalAppTheme.current
     val hazeState = LocalHazeState.current
     val oneShotBitmap = LocalOneShotBitmap.current
+    val frostedGlass = LocalFrostedGlass.current
     val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
-            (theme.bgMode == "image" || theme.bgMode == "blurred")
+            (theme.bgMode == "image" || theme.bgMode == "blurred") &&
+            frostedGlass
     // Transparent so the frosted modifier (hazeEffect or one-shot bitmap) shows through
     val legacyReady = Build.VERSION.SDK_INT < Build.VERSION_CODES.S && oneShotBitmap != null
     val modernReady = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null
@@ -601,21 +616,6 @@ fun ScribeComposeTheme(
     }
 
     val hazeState = rememberHazeState(blurEnabled = true)
-    val prefsManager = remember { PrefsManager(context) }
-    var legacyBlurEnabled by remember { mutableStateOf(prefsManager.legacyBlurEnabled) }
-
-    // Re-read the pref every time this composable re-enters the composition
-    // (e.g. returning from ThemeEditScreen where the toggle lives).
-    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                legacyBlurEnabled = prefsManager.legacyBlurEnabled
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
 
     MaterialTheme(
         colorScheme = animatedColorScheme,
@@ -625,7 +625,7 @@ fun ScribeComposeTheme(
                 LocalAppTheme provides resolvedTheme,
                 LocalBgAnalysisBitmap provides analysisBitmap,
                 LocalScreenSize provides Pair(screenWidthPx, screenHeightPx),
-                LocalLegacyBlur provides legacyBlurEnabled,
+                LocalFrostedGlass provides resolvedTheme.frostedGlassEnabled,
                 LocalSolidSurface provides animSurface,
                 // One-shot bitmap starts null; screens set it via their own
                 // CompositionLocalProvider wrapping the drawer/dialog content.
