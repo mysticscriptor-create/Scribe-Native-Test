@@ -8,7 +8,7 @@ import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import com.primaloptima.scribe.ScribeApp
 import com.primaloptima.scribe.data.Note
-import com.primaloptima.scribe.util.HistoryManager
+import com.primaloptima.scribe.data.NoteVersion
 import com.primaloptima.scribe.util.MarkdownUtil
 import com.primaloptima.scribe.util.SAFHelper
 import com.primaloptima.scribe.util.DefaultThemes
@@ -16,7 +16,6 @@ import com.primaloptima.scribe.util.ThemeDataStoreRepo
 import com.primaloptima.scribe.util.WritingStats
 import com.primaloptima.scribe.util.model.AppTheme
 import com.primaloptima.scribe.util.model.ExternalRoot
-import com.primaloptima.scribe.util.model.HistorySnapshot
 import com.primaloptima.scribe.util.model.OutlineEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -32,7 +31,6 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private val db = app.database
     private val themeManager = app.themeManager
     private val dataStoreRepo = ThemeDataStoreRepo(application)
-    private val historyManager = HistoryManager(prefs)
     val writingStats = WritingStats(prefs)
 
     // ── Active note ───────────────────────────────────────────────────────────
@@ -213,6 +211,8 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private var autosaveJob: Job? = null
     private var lastSavedContent: String = ""
     private var lastWordCount: Int = 0
+    /** Word count at the time of the last auto-snapshot — used for the min-words gate. */
+    private var lastSnapshotWordCount: Int = 0
     private val AUTOSAVE_DEBOUNCE_MS = 500L
 
     // ── Zen / UI state ────────────────────────────────────────────────────────
@@ -264,6 +264,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             _activeNote.value = loaded
             lastSavedContent = loaded.content
             lastWordCount = MarkdownUtil.countWords(loaded.content)
+            lastSnapshotWordCount = lastWordCount
             updateStats(loaded.content)
             checkRecovery(loaded)
         }
@@ -285,6 +286,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _recoveryAvailable.value = false
         lastSavedContent = ""
         lastWordCount = 0
+        lastSnapshotWordCount = 0
     }
 
     // ── Content change (called on every autosave tick) ────────────────────────
@@ -320,34 +322,62 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             db.noteDao().updateContent(note.id, content, System.currentTimeMillis())
         }
 
-        // History snapshot (time/diff gated)
-        withContext(Dispatchers.IO) { historyManager.maybeSnapshot(note.id, content) }
-
         lastSavedContent = content
         writingStats.recordWordDelta(delta)
         updateGoal()
     }
 
+    /**
+     * Called when the writer leaves a note (DisposableEffect onDispose).
+     * Saves an "auto" snapshot only if:
+     *   - auto-history is enabled in settings
+     *   - the net word change since the last snapshot meets the minimum threshold
+     */
     fun saveVersionSnapshotOnLeave(content: String) {
+        if (!prefs.autoHistoryEnabled) return
+        val note = _activeNote.value ?: return
+        if (content.isBlank()) return
+        val currentWords = MarkdownUtil.countWords(content)
+        val wordDelta = Math.abs(currentWords - lastSnapshotWordCount)
+        if (wordDelta < prefs.autoHistoryMinWords) return
+        viewModelScope.launch(Dispatchers.IO) {
+            db.noteVersionDao().insert(
+                NoteVersion(
+                    noteId = note.id,
+                    content = content,
+                    wordCount = currentWords,
+                    timestamp = System.currentTimeMillis(),
+                    type = NoteVersion.TYPE_AUTO
+                )
+            )
+            db.noteVersionDao().trimByType(note.id, NoteVersion.TYPE_AUTO, prefs.autoHistorySlots)
+            lastSnapshotWordCount = currentWords
+        }
+    }
+
+    /**
+     * Called when the writer taps the checkpoint (save) button in the toolbar.
+     * Always saves regardless of word count, bypasses the min-words gate.
+     */
+    fun saveManualSnapshot(content: String) {
+        if (!prefs.manualCheckpointsEnabled) return
         val note = _activeNote.value ?: return
         if (content.isBlank()) return
         viewModelScope.launch(Dispatchers.IO) {
             val words = MarkdownUtil.countWords(content)
             db.noteVersionDao().insert(
-                com.primaloptima.scribe.data.NoteVersion(
+                NoteVersion(
                     noteId = note.id,
                     content = content,
                     wordCount = words,
-                    timestamp = System.currentTimeMillis()
+                    timestamp = System.currentTimeMillis(),
+                    type = NoteVersion.TYPE_MANUAL
                 )
             )
-            db.noteVersionDao().trimOldVersions(note.id)
-        }
-    }
-
-    suspend fun getNoteVersions(noteId: String): List<com.primaloptima.scribe.data.NoteVersion> {
-        return withContext(Dispatchers.IO) {
-            db.noteVersionDao().getVersions(noteId)
+            db.noteVersionDao().trimByType(note.id, NoteVersion.TYPE_MANUAL, prefs.manualCheckpointSlots)
+            // Also update the snapshot word count baseline so the next auto-save
+            // calculates delta from this point forward.
+            lastSnapshotWordCount = words
         }
     }
 
@@ -401,11 +431,6 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // ── History ───────────────────────────────────────────────────────────────
-
-    fun getSnapshots(): List<HistorySnapshot> {
-        val noteId = _activeNote.value?.id ?: return emptyList()
-        return historyManager.getSnapshots(noteId)
-    }
 
     fun restoreSnapshot(content: String) {
         val note = _activeNote.value ?: return

@@ -40,6 +40,13 @@ fun SettingsScreen(
     var fontSize by remember { mutableFloatStateOf(prefs.editorFontSize.toFloat()) }
     var dailyGoal by remember { mutableIntStateOf(prefs.dailyGoal) }
 
+    // History settings
+    var autoHistoryEnabled by remember { mutableStateOf(prefs.autoHistoryEnabled) }
+    var manualCheckpointsEnabled by remember { mutableStateOf(prefs.manualCheckpointsEnabled) }
+    var autoHistorySlots by remember { mutableFloatStateOf(prefs.autoHistorySlots.toFloat()) }
+    var manualCheckpointSlots by remember { mutableFloatStateOf(prefs.manualCheckpointSlots.toFloat()) }
+    var autoHistoryMinWords by remember { mutableFloatStateOf(prefs.autoHistoryMinWords.toFloat()) }
+
     var showGoalDialog by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -136,6 +143,85 @@ fun SettingsScreen(
                             },
                             valueRange = 12f..28f
                         )
+                    }
+                }
+            }
+
+            HorizontalDivider()
+
+            // Version History Section
+            Text("Version History", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+
+            Card(shape = RoundedCornerShape(12.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Auto-save History", fontWeight = FontWeight.Medium)
+                            Text("Saves a snapshot when you leave a note", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+                        }
+                        Switch(
+                            checked = autoHistoryEnabled,
+                            onCheckedChange = { autoHistoryEnabled = it; prefs.autoHistoryEnabled = it }
+                        )
+                    }
+
+                    if (autoHistoryEnabled) {
+                        Column {
+                            Text("Auto-save slots: ${autoHistorySlots.toInt()}", fontWeight = FontWeight.Medium)
+                            Text("How many auto-saves to keep per note", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+                            Slider(
+                                value = autoHistorySlots,
+                                onValueChange = { autoHistorySlots = it; prefs.autoHistorySlots = it.toInt() },
+                                valueRange = 1f..30f,
+                                steps = 28
+                            )
+                        }
+
+                        Column {
+                            Text("Min words to trigger: ${autoHistoryMinWords.toInt()} words", fontWeight = FontWeight.Medium)
+                            Text("Net word change needed to auto-save", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+                            Slider(
+                                value = autoHistoryMinWords,
+                                onValueChange = { autoHistoryMinWords = it; prefs.autoHistoryMinWords = it.toInt() },
+                                valueRange = 1f..100f,
+                                steps = 98
+                            )
+                        }
+                    }
+
+                    HorizontalDivider()
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Manual Checkpoints", fontWeight = FontWeight.Medium)
+                            Text("Saved when you tap the bookmark button", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+                        }
+                        Switch(
+                            checked = manualCheckpointsEnabled,
+                            onCheckedChange = { manualCheckpointsEnabled = it; prefs.manualCheckpointsEnabled = it }
+                        )
+                    }
+
+                    if (manualCheckpointsEnabled) {
+                        Column {
+                            Text("Checkpoint slots: ${manualCheckpointSlots.toInt()}", fontWeight = FontWeight.Medium)
+                            Text("How many checkpoints to keep per note", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+                            Slider(
+                                value = manualCheckpointSlots,
+                                onValueChange = { manualCheckpointSlots = it; prefs.manualCheckpointSlots = it.toInt() },
+                                valueRange = 1f..30f,
+                                steps = 28
+                            )
+                        }
                     }
                 }
             }

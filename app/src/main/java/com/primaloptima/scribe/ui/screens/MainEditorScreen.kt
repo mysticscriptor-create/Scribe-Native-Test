@@ -56,6 +56,7 @@ import dev.chrisbanes.haze.hazeSource
 import androidx.compose.ui.layout.ContentScale
 import coil3.compose.AsyncImage
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -1048,8 +1049,12 @@ fun MainEditorScreen(
                                                 IconButton(onClick = { showFindBar = !showFindBar }) {
                                                     Icon(Icons.Default.Search, contentDescription = "Find")
                                                 }
-                                                IconButton(onClick = { editorVm.toggleZen() }) {
-                                                    Icon(Icons.Default.Fullscreen, contentDescription = "Zen Mode")
+                                                IconButton(onClick = {
+                                                    val text = editorRef?.text?.toString() ?: activeNote?.content ?: ""
+                                                    editorVm.saveManualSnapshot(text)
+                                                    Toast.makeText(context, "Checkpoint saved", Toast.LENGTH_SHORT).show()
+                                                }) {
+                                                    Icon(Icons.Default.BookmarkAdd, contentDescription = "Save Checkpoint")
                                                 }
 
                                                 var showMenu by remember { mutableStateOf(false) }
@@ -1240,6 +1245,7 @@ fun MainEditorScreen(
                                     val currentThemePrimary = MaterialTheme.colorScheme.primary
                                     val hasBgImage = !activeTheme?.backgroundImageUri.isNullOrEmpty()
 
+                                    Box(modifier = Modifier.fillMaxSize()) {
                                     AndroidView(
                                         factory = { ctx ->
                                             ScrollView(ctx).apply {
@@ -1293,7 +1299,18 @@ fun MainEditorScreen(
                                         },
                                         modifier = Modifier.fillMaxSize()
                                     )
-                                }
+                                    // Transparent overlay that only intercepts double-taps
+                                    // (single taps fall through to the editor underneath)
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .pointerInput(Unit) {
+                                                detectTapGestures(
+                                                    onDoubleTap = { editorVm.toggleZen() }
+                                                )
+                                            }
+                                    )
+                                    } // end editor Box
 
                                 // Floating Word Count Pill
                                 Box(

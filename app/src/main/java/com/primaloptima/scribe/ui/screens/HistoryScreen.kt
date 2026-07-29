@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -98,10 +99,22 @@ fun HistoryScreen(
                     .fillMaxSize()
                     .padding(padding)
             ) {
-                items(versions) { ver ->
+                itemsIndexed(versions) { index, ver ->
                     val dateStr = remember(ver.timestamp) {
                         SimpleDateFormat("MMM d, yyyy · h:mm a", Locale.getDefault()).format(Date(ver.timestamp))
                     }
+                    // Word delta vs. the next older version (index+1 is older because list is DESC)
+                    val deltaStr = remember(versions, index) {
+                        val olderWords = versions.getOrNull(index + 1)?.wordCount ?: 0
+                        val delta = ver.wordCount - olderWords
+                        when {
+                            index == versions.lastIndex -> null // oldest — no prior to compare
+                            delta > 0  -> "+$delta words"
+                            delta < 0  -> "$delta words"
+                            else       -> "no change"
+                        }
+                    }
+                    val isManual = ver.type == com.primaloptima.scribe.data.NoteVersion.TYPE_MANUAL
 
                     Card(
                         modifier = Modifier
@@ -116,15 +129,47 @@ fun HistoryScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                Icons.Default.History,
+                                if (isManual) Icons.Default.Bookmark else Icons.Default.History,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(28.dp)
                             )
                             Spacer(modifier = Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(dateStr, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                Text("${ver.wordCount} words", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(dateStr, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    if (isManual) {
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.primaryContainer,
+                                            shape = RoundedCornerShape(4.dp)
+                                        ) {
+                                            Text(
+                                                "Checkpoint",
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("${ver.wordCount} words", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                                    if (deltaStr != null) {
+                                        val deltaColor = when {
+                                            deltaStr.startsWith("+") -> Color(0xFF2E7D32)
+                                            deltaStr.startsWith("-") -> Color(0xFFC62828)
+                                            else -> MaterialTheme.colorScheme.outline
+                                        }
+                                        Text(deltaStr, fontSize = 12.sp, color = deltaColor, fontWeight = FontWeight.Medium)
+                                    }
+                                }
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
                                     ver.content.take(100).replace("\n", " "),
