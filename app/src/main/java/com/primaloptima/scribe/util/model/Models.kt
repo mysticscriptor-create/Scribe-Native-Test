@@ -90,6 +90,7 @@ data class AppTheme(
     val backgroundImageOpacity: Float? = 0.35f,
     val bgMode: String = "color", // "color" | "image" | "blurred"
     val blurIntensity: Float = 15f,
+    val frostedGlassEnabled: Boolean = true,
     val textAlignment: String = "left", // "left" | "justified" | "center"
     val themeScope: String = "whole_app", // "editor_only" | "whole_app"
     val emoji: String? = null
