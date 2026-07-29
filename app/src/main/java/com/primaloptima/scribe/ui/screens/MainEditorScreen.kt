@@ -1501,7 +1501,6 @@ fun MainEditorScreen(
         }
     }
 }
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
