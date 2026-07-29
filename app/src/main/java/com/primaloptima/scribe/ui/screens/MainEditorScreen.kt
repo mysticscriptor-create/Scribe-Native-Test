@@ -1310,7 +1310,6 @@ fun MainEditorScreen(
                                                 )
                                             }
                                     )
-                                    } // end editor Box
 
                                 // Floating Word Count Pill
                                 Box(
@@ -1395,7 +1394,7 @@ fun MainEditorScreen(
                                         Icon(Icons.Default.FullscreenExit, contentDescription = "Exit Zen")
                                     }
                                 }
-                            }
+                            } // end editor Box
                         }
                     }
                 }
