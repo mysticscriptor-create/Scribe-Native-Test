@@ -133,16 +133,28 @@ class PrefsManager(context: Context) {
         prefs.edit().putString(KEY_STREAK, gson.toJson(data)).apply()
     }
 
-    // ── History snapshots ─────────────────────────────────────────────────────
+    // ── History settings ──────────────────────────────────────────────────────
 
-    fun getSnapshotsJson(noteId: String): String =
-        prefs.getString("$KEY_HISTORY_PREFIX$noteId", "[]") ?: "[]"
+    var autoHistoryEnabled: Boolean
+        get()    = prefs.getBoolean(KEY_AUTO_HISTORY_ENABLED, true)
+        set(v)   = prefs.edit().putBoolean(KEY_AUTO_HISTORY_ENABLED, v).apply()
 
-    fun setSnapshotsJson(noteId: String, json: String) =
-        prefs.edit().putString("$KEY_HISTORY_PREFIX$noteId", json).apply()
+    var manualCheckpointsEnabled: Boolean
+        get()    = prefs.getBoolean(KEY_MANUAL_CHECKPOINTS_ENABLED, true)
+        set(v)   = prefs.edit().putBoolean(KEY_MANUAL_CHECKPOINTS_ENABLED, v).apply()
 
-    fun clearSnapshots(noteId: String) =
-        prefs.edit().remove("$KEY_HISTORY_PREFIX$noteId").apply()
+    var autoHistorySlots: Int
+        get()    = prefs.getInt(KEY_AUTO_HISTORY_SLOTS, 10)
+        set(v)   = prefs.edit().putInt(KEY_AUTO_HISTORY_SLOTS, v.coerceIn(1, 30)).apply()
+
+    var manualCheckpointSlots: Int
+        get()    = prefs.getInt(KEY_MANUAL_CHECKPOINT_SLOTS, 10)
+        set(v)   = prefs.edit().putInt(KEY_MANUAL_CHECKPOINT_SLOTS, v.coerceIn(1, 30)).apply()
+
+    /** Minimum net word change required to trigger an auto-save snapshot. */
+    var autoHistoryMinWords: Int
+        get()    = prefs.getInt(KEY_AUTO_HISTORY_MIN_WORDS, 10)
+        set(v)   = prefs.edit().putInt(KEY_AUTO_HISTORY_MIN_WORDS, v.coerceIn(1, 200)).apply()
 
     // ── Recovery buffer ───────────────────────────────────────────────────────
 
@@ -171,10 +183,14 @@ class PrefsManager(context: Context) {
         private const val KEY_TYPEWRITER         = "scribe.typewriterMode.v1"
         private const val KEY_LINE_SPACING       = "scribe.lineSpacing.v1"
         private const val KEY_EDITOR_FONT_SIZE   = "scribe.editorFontSize.v1"
-        private const val KEY_DAILY_GOAL         = "scribe.dailyGoal.v1"
-        private const val KEY_DAILY_WORDS_PREFIX = "scribe.dailyWords."
-        private const val KEY_STREAK             = "scribe.streak.v1"
-        private const val KEY_HISTORY_PREFIX     = "scribe.history."
-        private const val KEY_RECOVERY_PREFIX    = "scribe.recovery."
+        private const val KEY_DAILY_GOAL                  = "scribe.dailyGoal.v1"
+        private const val KEY_DAILY_WORDS_PREFIX          = "scribe.dailyWords."
+        private const val KEY_STREAK                      = "scribe.streak.v1"
+        private const val KEY_AUTO_HISTORY_ENABLED        = "scribe.autoHistoryEnabled.v1"
+        private const val KEY_MANUAL_CHECKPOINTS_ENABLED  = "scribe.manualCheckpointsEnabled.v1"
+        private const val KEY_AUTO_HISTORY_SLOTS          = "scribe.autoHistorySlots.v1"
+        private const val KEY_MANUAL_CHECKPOINT_SLOTS     = "scribe.manualCheckpointSlots.v1"
+        private const val KEY_AUTO_HISTORY_MIN_WORDS      = "scribe.autoHistoryMinWords.v1"
+        private const val KEY_RECOVERY_PREFIX             = "scribe.recovery."
     }
 }
