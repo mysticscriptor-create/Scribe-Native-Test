@@ -262,7 +262,6 @@ fun HomeScreen(
         Scaffold(
             containerColor = Color.Transparent,
             modifier = Modifier.then(swipeGestureModifier),
-            contentWindowInsets = WindowInsets.systemBars,
             topBar = {
                 TopAppBar(
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -390,8 +389,8 @@ fun HomeScreen(
                     containerColor = Color.Transparent,
                     tonalElevation = 0.dp,
                     modifier = Modifier
-                        .height(60.dp)
                         .frostedBar(hazeState)
+                        .windowInsetsPadding(WindowInsets.navigationBars)
                 ) {
                     val activeTheme = LocalAppTheme.current
                     val accentColor = activeTheme?.let { parseComposeColor(it.colors.accent, MaterialTheme.colorScheme.primary) }
