@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
+import coil3.request.allowHardware
 import com.primaloptima.scribe.*
 import com.primaloptima.scribe.data.Book
 import com.primaloptima.scribe.data.Folder
