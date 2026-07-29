@@ -60,6 +60,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
 import com.primaloptima.scribe.*
 import com.primaloptima.scribe.data.Book
 import com.primaloptima.scribe.data.Folder
@@ -853,8 +854,21 @@ private fun BookGridCard(
                 .clip(RoundedCornerShape(8.dp))
         ) {
             if (book.coverUri != null) {
+                val context = LocalContext.current
                 AsyncImage(
-                    model = book.coverUri,
+                    // On API < 31, one-shot blur uses View.draw(softwareCanvas).
+                    // Hardware bitmaps (Coil's default) crash that call silently,
+                    // causing captureOnly to return null and frosted glass to fall back.
+                    // Use allowHardware(false) on pre-API-31 so the cover stays as a
+                    // software bitmap that the canvas capture can read correctly.
+                    model = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                        ImageRequest.Builder(context)
+                            .data(book.coverUri)
+                            .allowHardware(false)
+                            .build()
+                    } else {
+                        book.coverUri
+                    },
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
@@ -951,8 +965,16 @@ private fun BookListRow(
                         .clip(RoundedCornerShape(4.dp))
                 ) {
                     if (book.coverUri != null) {
+                        val context = LocalContext.current
                         AsyncImage(
-                            model = book.coverUri,
+                            model = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                                ImageRequest.Builder(context)
+                                    .data(book.coverUri)
+                                    .allowHardware(false)
+                                    .build()
+                            } else {
+                                book.coverUri
+                            },
                             contentDescription = null,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()
