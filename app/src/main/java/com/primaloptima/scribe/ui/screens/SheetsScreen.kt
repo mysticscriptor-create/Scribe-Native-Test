@@ -1,6 +1,8 @@
 package com.primaloptima.scribe.ui.screens
 
+import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -27,6 +29,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -37,9 +40,16 @@ import com.google.gson.reflect.TypeToken
 import com.primaloptima.scribe.data.WorldEntry
 import com.primaloptima.scribe.ui.theme.FrostedDialog
 import com.primaloptima.scribe.ui.theme.LocalHazeState
+import com.primaloptima.scribe.ui.theme.LocalOneShotBitmap
 import com.primaloptima.scribe.ui.theme.LocalSolidSurface
+import com.primaloptima.scribe.ui.theme.frostedBar
+import com.primaloptima.scribe.ui.theme.frostedContainerColor
 import com.primaloptima.scribe.ui.theme.frostedFab
+import com.primaloptima.scribe.util.BitmapBlur
 import com.primaloptima.scribe.viewmodel.SheetsViewModel
+import dev.chrisbanes.haze.hazeSource
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,6 +69,27 @@ fun SheetsScreen(
     var entryToEdit by remember { mutableStateOf<WorldEntry?>(null) }
     var entryToDelete by remember { mutableStateOf<WorldEntry?>(null) }
 
+    val view = LocalView.current
+    val hazeState = LocalHazeState.current
+    var dialogOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var dialogCaptured by remember { mutableStateOf(false) }
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        val anyDialogOpen = showCreateDialog || entryToDetail != null ||
+                entryToEdit != null || entryToDelete != null
+        LaunchedEffect(anyDialogOpen) {
+            if (anyDialogOpen && !dialogCaptured) {
+                dialogCaptured = true
+                val raw = BitmapBlur.captureOnly(view)
+                dialogOneShotBitmap = withContext(Dispatchers.IO) {
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                }
+            } else if (!anyDialogOpen) {
+                dialogCaptured = false
+                dialogOneShotBitmap = null
+            }
+        }
+    }
+
     val filteredEntries = remember(allEntries, selectedCategory, searchQuery) {
         allEntries.filter { entry ->
             val matchesCategory = if (selectedCategory == "All") true else entry.type.equals(selectedCategory, ignoreCase = true)
@@ -74,6 +105,10 @@ fun SheetsScreen(
         contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
         topBar = {
             TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent
+                ),
+                modifier = Modifier.frostedBar(hazeState),
                 title = { Text("World Building Sheets", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -86,7 +121,7 @@ fun SheetsScreen(
             FloatingActionButton(
                 onClick = { showCreateDialog = true },
                 shape = CircleShape,
-                containerColor = MaterialTheme.colorScheme.primary,
+                containerColor = frostedContainerColor(fallback = MaterialTheme.colorScheme.primary),
                 contentColor = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier.frostedFab(LocalHazeState.current)
             ) {
@@ -151,7 +186,9 @@ fun SheetsScreen(
                 LazyColumn(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier)
                 ) {
                     items(filteredEntries, key = { it.id }) { entry ->
                         WorldEntryCard(
@@ -166,90 +203,92 @@ fun SheetsScreen(
         }
     }
 
-    if (showCreateDialog) {
-        var name by remember { mutableStateOf("") }
-        var type by remember { mutableStateOf(if (selectedCategory == "All") "character" else selectedCategory) }
+    CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap) {
+        if (showCreateDialog) {
+            var name by remember { mutableStateOf("") }
+            var type by remember { mutableStateOf(if (selectedCategory == "All") "character" else selectedCategory) }
 
-        FrostedDialog(
-            onDismissRequest = { showCreateDialog = false },
-            title = { Text("New World Sheet") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        label = { Text("Name / Title") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+            FrostedDialog(
+                onDismissRequest = { showCreateDialog = false },
+                title = { Text("New World Sheet") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = { name = it },
+                            label = { Text("Name / Title") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
 
-                    Text("Category", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(listOf("character", "location", "faction", "item", "lore", "timeline")) { cat ->
-                            FilterChip(
-                                selected = type == cat,
-                                onClick = { type = cat },
-                                label = { Text(cat.replaceFirstChar { it.titlecase() }) }
-                            )
+                        Text("Category", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            items(listOf("character", "location", "faction", "item", "lore", "timeline")) { cat ->
+                                FilterChip(
+                                    selected = type == cat,
+                                    onClick = { type = cat },
+                                    label = { Text(cat.replaceFirstChar { it.titlecase() }) }
+                                )
+                            }
                         }
                     }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            vm.createEntry(type, name) { created ->
+                                showCreateDialog = false
+                                entryToEdit = created
+                            }
+                        }
+                    ) { Text("Create") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showCreateDialog = false }) { Text("Cancel") }
                 }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        vm.createEntry(type, name) { created ->
-                            showCreateDialog = false
-                            entryToEdit = created
+            )
+        }
+
+        entryToDetail?.let { entry ->
+            WorldEntryDetailDialog(
+                entry = entry,
+                onDismiss = { entryToDetail = null },
+                onEdit = {
+                    entryToEdit = entry
+                    entryToDetail = null
+                }
+            )
+        }
+
+        entryToEdit?.let { entry ->
+            EditWorldEntryDialog(
+                entry = entry,
+                onDismiss = { entryToEdit = null },
+                onSave = { updated ->
+                    vm.updateEntry(updated)
+                    entryToEdit = null
+                }
+            )
+        }
+
+        entryToDelete?.let { entry ->
+            FrostedDialog(
+                onDismissRequest = { entryToDelete = null },
+                title = { Text("Delete Entry?") },
+                text = { Text("Are you sure you want to delete \"${entry.name}\"?") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            vm.deleteEntry(entry.id)
+                            entryToDelete = null
                         }
-                    }
-                ) { Text("Create") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCreateDialog = false }) { Text("Cancel") }
-            }
-        )
-    }
-
-    entryToDetail?.let { entry ->
-        WorldEntryDetailDialog(
-            entry = entry,
-            onDismiss = { entryToDetail = null },
-            onEdit = {
-                entryToEdit = entry
-                entryToDetail = null
-            }
-        )
-    }
-
-    entryToEdit?.let { entry ->
-        EditWorldEntryDialog(
-            entry = entry,
-            onDismiss = { entryToEdit = null },
-            onSave = { updated ->
-                vm.updateEntry(updated)
-                entryToEdit = null
-            }
-        )
-    }
-
-    entryToDelete?.let { entry ->
-        FrostedDialog(
-            onDismissRequest = { entryToDelete = null },
-            title = { Text("Delete Entry?") },
-            text = { Text("Are you sure you want to delete \"${entry.name}\"?") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        vm.deleteEntry(entry.id)
-                        entryToDelete = null
-                    }
-                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { entryToDelete = null }) { Text("Cancel") }
-            }
-        )
+                    ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { entryToDelete = null }) { Text("Cancel") }
+                }
+            )
+        }
     }
 }
 
@@ -669,4 +708,3 @@ private fun WorldEntryDetailDialog(
         }
     )
 }
-

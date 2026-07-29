@@ -43,6 +43,7 @@ import com.primaloptima.scribe.ui.theme.LocalHazeState
 import com.primaloptima.scribe.ui.theme.LocalOneShotBitmap
 import com.primaloptima.scribe.ui.theme.LocalSolidSurface
 import com.primaloptima.scribe.ui.theme.frostedBar
+import com.primaloptima.scribe.ui.theme.frostedContainerColor
 import com.primaloptima.scribe.ui.theme.frostedFab
 import com.primaloptima.scribe.ui.theme.frostedPanel
 import com.primaloptima.scribe.ui.theme.FrostedDialog
@@ -106,6 +107,27 @@ fun HomeScreen(
             }
         }
     }
+
+    // One-shot capture for dialogs on pre-API-31 devices
+    var dialogOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var dialogCaptured by remember { mutableStateOf(false) }
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        val anyDialogOpen = showCreateDialog || bookToRename != null ||
+                bookToDelete != null || bookToChangeCover != null
+        LaunchedEffect(anyDialogOpen) {
+            if (anyDialogOpen && !dialogCaptured) {
+                dialogCaptured = true
+                val raw = BitmapBlur.captureOnly(view)
+                dialogOneShotBitmap = withContext(Dispatchers.IO) {
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                }
+            } else if (!anyDialogOpen) {
+                dialogCaptured = false
+                dialogOneShotBitmap = null
+            }
+        }
+    }
+
     val repo = remember { ThemeDataStoreRepo(context) }
 
     // 0: Books, 1: Notes, 2: Statistics
@@ -194,6 +216,7 @@ fun HomeScreen(
 
     val hazeState = LocalHazeState.current
 
+    CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap) {
     ModalNavigationDrawer(
         drawerState = drawerState,
         gesturesEnabled = true,
@@ -454,9 +477,10 @@ fun HomeScreen(
                     when (tab) {
                         0 -> FloatingActionButton(
                             onClick = { showCreateDialog = true },
-                            containerColor = accentClr,
+                            containerColor = frostedContainerColor(fallback = accentClr),
                             contentColor = Color.White,
-                            shape = RoundedCornerShape(16.dp)
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.frostedFab(LocalHazeState.current)
                         ) {
                             Icon(Icons.Default.Add, contentDescription = "New Book")
                         }
@@ -472,9 +496,10 @@ fun HomeScreen(
                             },
                             icon = { Icon(Icons.Default.Edit, contentDescription = null) },
                             text = { Text("Quick Note") },
-                            containerColor = accentClr,
+                            containerColor = frostedContainerColor(fallback = accentClr),
                             contentColor = Color.White,
-                            shape = RoundedCornerShape(16.dp)
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.frostedFab(LocalHazeState.current)
                         )
                         else -> Box(Modifier)
                     }
@@ -705,6 +730,7 @@ fun HomeScreen(
             }
         )
     }
+    } // end CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap)
 }
 
 @Composable

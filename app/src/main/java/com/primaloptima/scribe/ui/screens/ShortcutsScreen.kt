@@ -1,5 +1,7 @@
 package com.primaloptima.scribe.ui.screens
 
+import android.graphics.Bitmap
+import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -15,16 +17,25 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.primaloptima.scribe.ui.theme.FrostedDialog
 import com.primaloptima.scribe.ui.theme.LocalHazeState
+import com.primaloptima.scribe.ui.theme.LocalOneShotBitmap
 import com.primaloptima.scribe.ui.theme.LocalSolidSurface
+import com.primaloptima.scribe.ui.theme.frostedBar
+import com.primaloptima.scribe.ui.theme.frostedContainerColor
 import com.primaloptima.scribe.ui.theme.frostedFab
+import com.primaloptima.scribe.util.BitmapBlur
 import com.primaloptima.scribe.util.model.ShortcutAction
 import com.primaloptima.scribe.viewmodel.ShortcutsViewModel
+import dev.chrisbanes.haze.hazeSource
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -39,10 +50,33 @@ fun ShortcutsScreen(
     var shortcutToEdit by remember { mutableStateOf<ShortcutAction?>(null) }
     var shortcutToDelete by remember { mutableStateOf<ShortcutAction?>(null) }
 
+    val view = LocalView.current
+    val hazeState = LocalHazeState.current
+    var dialogOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var dialogCaptured by remember { mutableStateOf(false) }
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        LaunchedEffect(showEditDialog) {
+            if (showEditDialog && !dialogCaptured) {
+                dialogCaptured = true
+                val raw = BitmapBlur.captureOnly(view)
+                dialogOneShotBitmap = withContext(Dispatchers.IO) {
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                }
+            } else if (!showEditDialog) {
+                dialogCaptured = false
+                dialogOneShotBitmap = null
+            }
+        }
+    }
+
     Scaffold(
         contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
         topBar = {
             TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent
+                ),
+                modifier = Modifier.frostedBar(hazeState),
                 title = { Text("Shortcuts", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -66,7 +100,7 @@ fun ShortcutsScreen(
                     showEditDialog = true
                 },
                 shape = CircleShape,
-                containerColor = MaterialTheme.colorScheme.primary,
+                containerColor = frostedContainerColor(fallback = MaterialTheme.colorScheme.primary),
                 contentColor = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier.frostedFab(LocalHazeState.current)
             ) {
@@ -79,59 +113,62 @@ fun ShortcutsScreen(
                 Text("No shortcuts configured. Tap + to create one.", color = MaterialTheme.colorScheme.outline)
             }
         } else {
-            LazyColumn(
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-            ) {
-                items(shortcuts, key = { it.id }) { shortcut ->
-                    ShortcutRow(
-                        shortcut = shortcut,
-                        onEdit = {
-                            shortcutToEdit = shortcut
-                            showEditDialog = true
+            CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap) {
+                LazyColumn(
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .then(if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier)
+                ) {
+                    items(shortcuts, key = { it.id }) { shortcut ->
+                        ShortcutRow(
+                            shortcut = shortcut,
+                            onEdit = {
+                                shortcutToEdit = shortcut
+                                showEditDialog = true
+                            },
+                            onDelete = { shortcutToDelete = shortcut }
+                        )
+                    }
+                }
+
+                if (showEditDialog) {
+                    EditShortcutDialog(
+                        existing = shortcutToEdit,
+                        onDismiss = { showEditDialog = false },
+                        onSave = { shortcut ->
+                            if (shortcutToEdit == null) {
+                                vm.add(shortcut)
+                            } else {
+                                vm.update(shortcut)
+                            }
+                            showEditDialog = false
+                        }
+                    )
+                }
+
+                shortcutToDelete?.let { shortcut ->
+                    FrostedDialog(
+                        onDismissRequest = { shortcutToDelete = null },
+                        title = { Text("Delete \"${shortcut.label}\"?") },
+                        text = { Text("Are you sure you want to delete this shortcut?") },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    vm.delete(shortcut.id)
+                                    shortcutToDelete = null
+                                }
+                            ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
                         },
-                        onDelete = { shortcutToDelete = shortcut }
+                        dismissButton = {
+                            TextButton(onClick = { shortcutToDelete = null }) { Text("Cancel") }
+                        }
                     )
                 }
             }
         }
-    }
-
-    if (showEditDialog) {
-        EditShortcutDialog(
-            existing = shortcutToEdit,
-            onDismiss = { showEditDialog = false },
-            onSave = { shortcut ->
-                if (shortcutToEdit == null) {
-                    vm.add(shortcut)
-                } else {
-                    vm.update(shortcut)
-                }
-                showEditDialog = false
-            }
-        )
-    }
-
-    shortcutToDelete?.let { shortcut ->
-        FrostedDialog(
-            onDismissRequest = { shortcutToDelete = null },
-            title = { Text("Delete \"${shortcut.label}\"?") },
-            text = { Text("Are you sure you want to delete this shortcut?") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        vm.delete(shortcut.id)
-                        shortcutToDelete = null
-                    }
-                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { shortcutToDelete = null }) { Text("Cancel") }
-            }
-        )
     }
 }
 

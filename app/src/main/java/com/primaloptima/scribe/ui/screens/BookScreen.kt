@@ -75,6 +75,16 @@ fun BookScreen(
     var oneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var captured by remember { mutableStateOf(false) }
     var isFabExpanded by remember { mutableStateOf(false) }
+
+    // Dialog states declared early so dialogCaptured LaunchedEffect can reference them
+    var showCreateNoteDialog by remember { mutableStateOf(false) }
+    var showCreateFolderDialog by remember { mutableStateOf(false) }
+    var noteToRename by remember { mutableStateOf<Note?>(null) }
+    var noteToDelete by remember { mutableStateOf<Note?>(null) }
+
+    var dialogOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var dialogCaptured by remember { mutableStateOf(false) }
+
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
         // Capture when FAB expands (FABs appear instantly, so capture on expand)
         LaunchedEffect(isFabExpanded) {
@@ -89,6 +99,23 @@ fun BookScreen(
                 oneShotBitmap = null
             }
         }
+
+        // Separate capture for dialogs — keyed independently so closing the FAB
+        // (isFabExpanded = false) before a dialog opens doesn't clear the bitmap
+        val anyDialogOpen = showCreateNoteDialog || showCreateFolderDialog ||
+                noteToRename != null || noteToDelete != null
+        LaunchedEffect(anyDialogOpen) {
+            if (anyDialogOpen && !dialogCaptured) {
+                dialogCaptured = true
+                val raw = BitmapBlur.captureOnly(view)
+                dialogOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                }
+            } else if (!anyDialogOpen) {
+                dialogCaptured = false
+                dialogOneShotBitmap = null
+            }
+        }
     }
 
     val book by vm.book.observeAsState()
@@ -100,11 +127,7 @@ fun BookScreen(
     // Bottom Bar tab state inside BookScreen: 0: Write, 1: Statistics
     var selectedTab by remember { mutableIntStateOf(0) }
 
-    // Dialog states
-    var showCreateNoteDialog by remember { mutableStateOf(false) }
-    var showCreateFolderDialog by remember { mutableStateOf(false) }
-    var noteToRename by remember { mutableStateOf<Note?>(null) }
-    var noteToDelete by remember { mutableStateOf<Note?>(null) }
+    // (dialog state vars declared above near capture block)
     var selectedFolderPath by remember { mutableStateOf("/") }
 
     val coverPickerLauncher = rememberLauncherForActivityResult(
@@ -543,7 +566,10 @@ fun BookScreen(
         }
     }
 
-    // Dialogs
+    // Dialogs — wrapped in their own provider so dialogOneShotBitmap (not the FAB
+    // bitmap) is used, preventing the FAB collapse from clearing the blur before
+    // the dialog renders on Android 10.
+    CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap) {
     if (showCreateNoteDialog) {
         var noteTitle by remember { mutableStateOf("") }
         FrostedDialog(
@@ -661,6 +687,7 @@ fun BookScreen(
             }
         )
     }
+    } // end CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap)
     } // end CompositionLocalProvider(LocalOneShotBitmap provides oneShotBitmap)
 }
 

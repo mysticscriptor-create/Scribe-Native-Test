@@ -2,11 +2,14 @@ package com.primaloptima.scribe.ui.screens
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.RenderEffect as AndroidRenderEffect
 import android.graphics.Shader
 import android.net.Uri
 import android.os.Build
 import android.widget.Toast
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -51,7 +54,13 @@ import kotlinx.coroutines.launch
 import com.google.gson.GsonBuilder
 import com.primaloptima.scribe.ui.theme.FontHelper
 import com.primaloptima.scribe.ui.theme.FrostedDialog
+import com.primaloptima.scribe.ui.theme.LocalHazeState
+import com.primaloptima.scribe.ui.theme.LocalOneShotBitmap
+import com.primaloptima.scribe.ui.theme.frostedBar
 import com.primaloptima.scribe.ui.theme.parseComposeColor
+import com.primaloptima.scribe.util.BitmapBlur
+import dev.chrisbanes.haze.hazeSource
+import kotlinx.coroutines.withContext
 import com.primaloptima.scribe.util.DefaultThemes
 import com.primaloptima.scribe.util.SAFHelper
 import com.primaloptima.scribe.util.model.AppTheme
@@ -96,6 +105,26 @@ fun ThemeEditScreen(
     var activeColorPickerTarget by remember { mutableStateOf<ColorPickerTarget?>(null) }
     var showEmojiDialog by remember { mutableStateOf(false) }
 
+    val view = LocalView.current
+    val hazeState = LocalHazeState.current
+    var dialogOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var dialogCaptured by remember { mutableStateOf(false) }
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        val anyDialogOpen = showEmojiDialog || activeColorPickerTarget != null
+        LaunchedEffect(anyDialogOpen) {
+            if (anyDialogOpen && !dialogCaptured) {
+                dialogCaptured = true
+                val raw = BitmapBlur.captureOnly(view)
+                dialogOneShotBitmap = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                }
+            } else if (!anyDialogOpen) {
+                dialogCaptured = false
+                dialogOneShotBitmap = null
+            }
+        }
+    }
+
     val scope = rememberCoroutineScope()
 
     // Fix: copy image to internal app storage so it survives process death.
@@ -116,6 +145,10 @@ fun ThemeEditScreen(
         contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
         topBar = {
             TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent
+                ),
+                modifier = Modifier.frostedBar(hazeState),
                 title = {
                     Text(
                         if (originalTheme.builtIn) "View Theme" else "Edit Theme",
@@ -169,6 +202,7 @@ fun ThemeEditScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .then(if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier)
         ) {
             // SECTION 1: APPEARANCE
             item {
@@ -620,35 +654,36 @@ fun ThemeEditScreen(
         }
     }
 
-    // Modal Color Picker Bottom Sheet
-    activeColorPickerTarget?.let { target ->
-        val title = when (target) {
-            ColorPickerTarget.BACKGROUND -> "Background Color"
-            ColorPickerTarget.TEXT -> "Text Color"
-            ColorPickerTarget.ACCENT -> "Accent Color"
-        }
-        val currentHex = when (target) {
-            ColorPickerTarget.BACKGROUND -> bgHex
-            ColorPickerTarget.TEXT -> textHex
-            ColorPickerTarget.ACCENT -> accentHex
-        }
-
-        ColorPickerBottomSheet(
-            title = title,
-            initialHex = currentHex,
-            onDismiss = { activeColorPickerTarget = null },
-            onColorSelected = { newHex ->
-                when (target) {
-                    ColorPickerTarget.BACKGROUND -> bgHex = newHex
-                    ColorPickerTarget.TEXT -> textHex = newHex
-                    ColorPickerTarget.ACCENT -> accentHex = newHex
-                }
+    CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap) {
+        // Modal Color Picker Bottom Sheet
+        activeColorPickerTarget?.let { target ->
+            val title = when (target) {
+                ColorPickerTarget.BACKGROUND -> "Background Color"
+                ColorPickerTarget.TEXT -> "Text Color"
+                ColorPickerTarget.ACCENT -> "Accent Color"
             }
-        )
-    }
+            val currentHex = when (target) {
+                ColorPickerTarget.BACKGROUND -> bgHex
+                ColorPickerTarget.TEXT -> textHex
+                ColorPickerTarget.ACCENT -> accentHex
+            }
 
-    // Emoji Picker Dialog
-    if (showEmojiDialog) {
+            ColorPickerBottomSheet(
+                title = title,
+                initialHex = currentHex,
+                onDismiss = { activeColorPickerTarget = null },
+                onColorSelected = { newHex ->
+                    when (target) {
+                        ColorPickerTarget.BACKGROUND -> bgHex = newHex
+                        ColorPickerTarget.TEXT -> textHex = newHex
+                        ColorPickerTarget.ACCENT -> accentHex = newHex
+                    }
+                }
+            )
+        }
+
+        // Emoji Picker Dialog
+        if (showEmojiDialog) {
         val emojis = listOf("🖊️", "📖", "🌙", "⭐", "🌿", "🔥", "🌊", "🌸", "🏔️", "🌌", "📜", "✨", "🎭", "🌅", "🍂", "❄️", "🌙", "🪶", "🕯️", "🌺")
         FrostedDialog(
             onDismissRequest = { showEmojiDialog = false },
@@ -680,6 +715,7 @@ fun ThemeEditScreen(
                 TextButton(onClick = { showEmojiDialog = false }) { Text("Close") }
             }
         )
+        }
     }
 }
 

@@ -2,7 +2,9 @@ package com.primaloptima.scribe.ui.screens
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -25,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -35,13 +38,22 @@ import com.primaloptima.scribe.ThemeEditActivity
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.style.TextOverflow
 import com.primaloptima.scribe.ui.theme.FrostedDialog
+import com.primaloptima.scribe.ui.theme.LocalHazeState
+import com.primaloptima.scribe.ui.theme.LocalOneShotBitmap
 import com.primaloptima.scribe.ui.theme.LocalSolidSurface
+import com.primaloptima.scribe.ui.theme.frostedBar
+import com.primaloptima.scribe.ui.theme.frostedContainerColor
+import com.primaloptima.scribe.ui.theme.frostedFab
 import com.primaloptima.scribe.ui.theme.parseComposeColor
 import com.primaloptima.scribe.ui.theme.FontHelper
+import com.primaloptima.scribe.util.BitmapBlur
 import com.primaloptima.scribe.util.DefaultThemes
 import com.primaloptima.scribe.util.model.AppTheme
 import com.primaloptima.scribe.viewmodel.ThemeViewModel
+import dev.chrisbanes.haze.hazeSource
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -55,6 +67,26 @@ fun ThemeListScreen(
 
     var themeToDelete by remember { mutableStateOf<AppTheme?>(null) }
     var showTopMenu by remember { mutableStateOf(false) }
+
+    val view = LocalView.current
+    val hazeState = LocalHazeState.current
+    var dialogOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var dialogCaptured by remember { mutableStateOf(false) }
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        val anyDialogOpen = themeToDelete != null
+        LaunchedEffect(anyDialogOpen) {
+            if (anyDialogOpen && !dialogCaptured) {
+                dialogCaptured = true
+                val raw = BitmapBlur.captureOnly(view)
+                dialogOneShotBitmap = withContext(Dispatchers.IO) {
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                }
+            } else if (!anyDialogOpen) {
+                dialogCaptured = false
+                dialogOneShotBitmap = null
+            }
+        }
+    }
 
     val importThemeLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -75,6 +107,10 @@ fun ThemeListScreen(
         contentWindowInsets = WindowInsets.systemBars,
         topBar = {
             TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent
+                ),
+                modifier = Modifier.frostedBar(hazeState),
                 title = { Text("Themes", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -119,7 +155,9 @@ fun ThemeListScreen(
                         Intent(context, ThemeEditActivity::class.java)
                             .putExtra("theme_id", newTheme.id)
                     )
-                }
+                },
+                containerColor = frostedContainerColor(fallback = MaterialTheme.colorScheme.primary),
+                modifier = Modifier.frostedFab(hazeState)
             ) {
                 Icon(Icons.Default.Add, contentDescription = "New Theme")
             }
@@ -131,6 +169,7 @@ fun ThemeListScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .then(if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier)
         ) {
             itemsIndexed(
                 items = sortedThemes,
@@ -163,23 +202,25 @@ fun ThemeListScreen(
         }
     }
 
-    themeToDelete?.let { theme ->
-        FrostedDialog(
-            onDismissRequest = { themeToDelete = null },
-            title = { Text("Delete \"${theme.name}\"?") },
-            text = { Text("Are you sure you want to delete this theme?") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        vm.delete(theme.id)
-                        themeToDelete = null
-                    }
-                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { themeToDelete = null }) { Text("Cancel") }
-            }
-        )
+    CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap) {
+        themeToDelete?.let { theme ->
+            FrostedDialog(
+                onDismissRequest = { themeToDelete = null },
+                title = { Text("Delete \"${theme.name}\"?") },
+                text = { Text("Are you sure you want to delete this theme?") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            vm.delete(theme.id)
+                            themeToDelete = null
+                        }
+                    ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { themeToDelete = null }) { Text("Cancel") }
+                }
+            )
+        }
     }
 }
 

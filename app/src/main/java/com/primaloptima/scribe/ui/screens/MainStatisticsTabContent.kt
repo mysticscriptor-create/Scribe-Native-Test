@@ -39,10 +39,13 @@ import com.primaloptima.scribe.util.PrefsManager
 import com.primaloptima.scribe.util.ThemeDataStoreRepo
 import com.primaloptima.scribe.ui.theme.LocalAppTheme
 import com.primaloptima.scribe.ui.theme.LocalHazeState
+import com.primaloptima.scribe.ui.theme.LocalOneShotBitmap
 import com.primaloptima.scribe.ui.theme.parseComposeColor
 import com.primaloptima.scribe.ui.theme.rememberAdaptiveTextColor
 import com.primaloptima.scribe.ui.theme.frostedCard
+import com.primaloptima.scribe.ui.theme.frostedContainerColor
 import com.primaloptima.scribe.ui.theme.FrostedDialog
+import com.primaloptima.scribe.util.BitmapBlur
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -133,6 +136,24 @@ private fun DetailedStatisticsTab(
     var selectedRange by remember { mutableStateOf(ChartRange.WEEK) }
     var dailyGoal by remember { mutableIntStateOf(500) }
     var showGoalDialog by remember { mutableStateOf(false) }
+
+    val view = androidx.compose.ui.platform.LocalView.current
+    var dialogOneShotBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var dialogCaptured by remember { mutableStateOf(false) }
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) {
+        LaunchedEffect(showGoalDialog) {
+            if (showGoalDialog && !dialogCaptured) {
+                dialogCaptured = true
+                val raw = BitmapBlur.captureOnly(view)
+                dialogOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                }
+            } else if (!showGoalDialog) {
+                dialogCaptured = false
+                dialogOneShotBitmap = null
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         repo.dailyGoalFlow.collectLatest { goal ->
@@ -400,36 +421,40 @@ private fun DetailedStatisticsTab(
         }
     }
 
-    if (showGoalDialog) {
-        var inputGoal by remember { mutableStateOf(dailyGoal.toString()) }
-        FrostedDialog(
-            onDismissRequest = { showGoalDialog = false },
-            title = { Text("Set Daily Word Goal") },
-            text = {
-                OutlinedTextField(
-                    value = inputGoal,
-                    onValueChange = { inputGoal = it },
-                    label = { Text("Target Words per Day") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val parsed = inputGoal.toIntOrNull() ?: 500
-                        scope.launch {
-                            repo.setDailyGoal(parsed)
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalOneShotBitmap provides dialogOneShotBitmap
+    ) {
+        if (showGoalDialog) {
+            var inputGoal by remember { mutableStateOf(dailyGoal.toString()) }
+            FrostedDialog(
+                onDismissRequest = { showGoalDialog = false },
+                title = { Text("Set Daily Word Goal") },
+                text = {
+                    OutlinedTextField(
+                        value = inputGoal,
+                        onValueChange = { inputGoal = it },
+                        label = { Text("Target Words per Day") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val parsed = inputGoal.toIntOrNull() ?: 500
+                            scope.launch {
+                                repo.setDailyGoal(parsed)
+                            }
+                            prefs.dailyGoal = parsed
+                            showGoalDialog = false
                         }
-                        prefs.dailyGoal = parsed
-                        showGoalDialog = false
-                    }
-                ) { Text("Save") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showGoalDialog = false }) { Text("Cancel") }
-            }
-        )
+                    ) { Text("Save") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showGoalDialog = false }) { Text("Cancel") }
+                }
+            )
+        }
     }
 }
 
@@ -744,11 +769,17 @@ private fun AnimatedRankCard(
             animationSpec = tween(300)
         )
     ) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
+        val hazeState = LocalHazeState.current
+        ElevatedCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .frostedCard(hazeState, shape = RoundedCornerShape(12.dp)),
             shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = if (isTopRank) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer
+            colors = CardDefaults.elevatedCardColors(
+                containerColor = frostedContainerColor(
+                    fallback = if (isTopRank) MaterialTheme.colorScheme.primaryContainer
+                               else MaterialTheme.colorScheme.surfaceContainer
+                )
             )
         ) {
             Column(modifier = Modifier.padding(14.dp)) {

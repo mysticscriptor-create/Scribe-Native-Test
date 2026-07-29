@@ -1,5 +1,7 @@
 package com.primaloptima.scribe.ui.screens
 
+import android.graphics.Bitmap
+import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -31,7 +34,12 @@ import androidx.compose.ui.unit.sp
 import com.primaloptima.scribe.ScribeApp
 import com.primaloptima.scribe.data.NoteVersion
 import com.primaloptima.scribe.ui.theme.FrostedDialog
+import com.primaloptima.scribe.ui.theme.LocalHazeState
+import com.primaloptima.scribe.ui.theme.LocalOneShotBitmap
+import com.primaloptima.scribe.ui.theme.frostedBar
+import com.primaloptima.scribe.util.BitmapBlur
 import com.primaloptima.scribe.util.MarkdownUtil
+import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -70,10 +78,34 @@ fun HistoryScreen(
     var selectedVersion by remember { mutableStateOf<NoteVersion?>(null) }
     var showConfirmRestoreDialog by remember { mutableStateOf(false) }
 
+    val view = LocalView.current
+    val hazeState = LocalHazeState.current
+    var dialogOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var dialogCaptured by remember { mutableStateOf(false) }
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        val anyDialogOpen = selectedVersion != null || showConfirmRestoreDialog
+        LaunchedEffect(anyDialogOpen) {
+            if (anyDialogOpen && !dialogCaptured) {
+                dialogCaptured = true
+                val raw = BitmapBlur.captureOnly(view)
+                dialogOneShotBitmap = withContext(Dispatchers.IO) {
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                }
+            } else if (!anyDialogOpen) {
+                dialogCaptured = false
+                dialogOneShotBitmap = null
+            }
+        }
+    }
+
     Scaffold(
         contentWindowInsets = WindowInsets.systemBars,
         topBar = {
             TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent
+                ),
+                modifier = Modifier.frostedBar(hazeState),
                 title = { Text("Version History", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -99,6 +131,7 @@ fun HistoryScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
+                    .then(if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier)
             ) {
                 itemsIndexed(versions) { index, ver ->
                     val dateStr = remember(ver.timestamp) {
@@ -187,82 +220,84 @@ fun HistoryScreen(
         }
     }
 
-    selectedVersion?.let { ver ->
-        val dateStr = remember(ver.timestamp) {
-            SimpleDateFormat("MMM d, yyyy · h:mm a", Locale.getDefault()).format(Date(ver.timestamp))
+    CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap) {
+        selectedVersion?.let { ver ->
+            val dateStr = remember(ver.timestamp) {
+                SimpleDateFormat("MMM d, yyyy · h:mm a", Locale.getDefault()).format(Date(ver.timestamp))
+            }
+
+            FrostedDialog(
+                onDismissRequest = { selectedVersion = null },
+                title = {
+                    Column {
+                        Text("Version Preview", fontWeight = FontWeight.Bold)
+                        Text(dateStr, fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+                    }
+                },
+                text = {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 350.dp)
+                            .verticalScroll(rememberScrollState())
+                            .background(
+                                MaterialTheme.colorScheme.surfaceVariant,
+                                RoundedCornerShape(8.dp)
+                            )
+                            .padding(12.dp)
+                    ) {
+                        val diffAnnotated = remember(currentNoteContent, ver.content) {
+                            buildDiffAnnotatedString(currentNoteContent, ver.content)
+                        }
+                        Text(text = diffAnnotated, fontSize = 13.sp, lineHeight = 18.sp)
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { showConfirmRestoreDialog = true }
+                    ) {
+                        Text("Restore this version")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { selectedVersion = null }) {
+                        Text("Close")
+                    }
+                }
+            )
         }
 
-        FrostedDialog(
-            onDismissRequest = { selectedVersion = null },
-            title = {
-                Column {
-                    Text("Version Preview", fontWeight = FontWeight.Bold)
-                    Text(dateStr, fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
-                }
-            },
-            text = {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 350.dp)
-                        .verticalScroll(rememberScrollState())
-                        .background(
-                            MaterialTheme.colorScheme.surfaceVariant,
-                            RoundedCornerShape(8.dp)
-                        )
-                        .padding(12.dp)
-                ) {
-                    val diffAnnotated = remember(currentNoteContent, ver.content) {
-                        buildDiffAnnotatedString(currentNoteContent, ver.content)
-                    }
-                    Text(text = diffAnnotated, fontSize = 13.sp, lineHeight = 18.sp)
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = { showConfirmRestoreDialog = true }
-                ) {
-                    Text("Restore this version")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { selectedVersion = null }) {
-                    Text("Close")
-                }
-            }
-        )
-    }
-
-    if (showConfirmRestoreDialog && selectedVersion != null) {
-        FrostedDialog(
-            onDismissRequest = { showConfirmRestoreDialog = false },
-            title = { Text("Confirm Restore") },
-            text = { Text("Are you sure you want to replace current note content with this saved version?") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val ver = selectedVersion!!
-                        scope.launch(Dispatchers.IO) {
-                            val db = app.database
-                            db.noteDao().updateContent(noteId, ver.content, System.currentTimeMillis())
-                            withContext(Dispatchers.Main) {
-                                Toast.makeText(context, "Version restored successfully", Toast.LENGTH_SHORT).show()
-                                showConfirmRestoreDialog = false
-                                selectedVersion = null
-                                onBack()
+        if (showConfirmRestoreDialog && selectedVersion != null) {
+            FrostedDialog(
+                onDismissRequest = { showConfirmRestoreDialog = false },
+                title = { Text("Confirm Restore") },
+                text = { Text("Are you sure you want to replace current note content with this saved version?") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val ver = selectedVersion!!
+                            scope.launch(Dispatchers.IO) {
+                                val db = app.database
+                                db.noteDao().updateContent(noteId, ver.content, System.currentTimeMillis())
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(context, "Version restored successfully", Toast.LENGTH_SHORT).show()
+                                    showConfirmRestoreDialog = false
+                                    selectedVersion = null
+                                    onBack()
+                                }
                             }
                         }
+                    ) {
+                        Text("Restore")
                     }
-                ) {
-                    Text("Restore")
+                },
+                dismissButton = {
+                    TextButton(onClick = { showConfirmRestoreDialog = false }) {
+                        Text("Cancel")
+                    }
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = { showConfirmRestoreDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
+            )
+        }
     }
 }
 

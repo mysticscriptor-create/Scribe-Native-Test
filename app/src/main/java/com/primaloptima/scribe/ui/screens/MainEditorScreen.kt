@@ -110,6 +110,8 @@ fun MainEditorScreen(
     // Track whether we've already captured for the current open gesture
     var leftCaptured by remember { mutableStateOf(false) }
     var rightCaptured by remember { mutableStateOf(false) }
+    var dialogOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var dialogCaptured by remember { mutableStateOf(false) }
 
     // Trigger capture when drawers start sliding open (pre-API-31 only)
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
@@ -135,6 +137,22 @@ fun MainEditorScreen(
             } else if (rightDrawerState.currentValue == DrawerValue.Closed) {
                 rightCaptured = false
                 rightOneShotBitmap = null
+            }
+        }
+
+        // Dialog capture — independent of drawer state so closing a drawer before
+        // a dialog opens doesn't clear the bitmap on Android 10
+        val anyDialogOpen = showRenameDialog || showCreateNoteDialog || filePickerTargetSlot != null
+        LaunchedEffect(anyDialogOpen) {
+            if (anyDialogOpen && !dialogCaptured) {
+                dialogCaptured = true
+                val raw = BitmapBlur.captureOnly(view)
+                dialogOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                }
+            } else if (!anyDialogOpen) {
+                dialogCaptured = false
+                dialogOneShotBitmap = null
             }
         }
     }
@@ -1440,6 +1458,7 @@ fun MainEditorScreen(
             onMoveWindow = { id, x, y -> editorVm.moveFloatingWindow(id, x, y) }
         )
 
+        CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap) {
         if (showRenameDialog && activeNote != null) {
             val noteToRename = activeNote
             var renameText by remember { mutableStateOf(noteToRename?.name ?: "") }
@@ -1519,6 +1538,7 @@ fun MainEditorScreen(
                 onDismiss = { filePickerTargetSlot = null }
             )
         }
+        } // end CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap)
     }
         } // end ModalNavigationDrawer
     } // end outer Box
