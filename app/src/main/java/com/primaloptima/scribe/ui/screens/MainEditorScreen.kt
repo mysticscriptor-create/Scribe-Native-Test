@@ -1500,6 +1500,8 @@ fun MainEditorScreen(
             )
         }
     }
+        } // end ModalNavigationDrawer
+    } // end outer Box
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
