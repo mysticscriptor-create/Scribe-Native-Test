@@ -57,6 +57,8 @@ import androidx.compose.ui.layout.ContentScale
 import coil3.compose.AsyncImage
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.awaitPointerEventScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -1305,9 +1307,28 @@ fun MainEditorScreen(
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .pointerInput(Unit) {
-                                                detectTapGestures(
-                                                    onDoubleTap = { editorVm.toggleZen() }
-                                                )
+                                                val doubleTapTimeout = viewConfiguration.doubleTapTimeoutMillis
+                                                val doubleTapMinTime = viewConfiguration.doubleTapMinTimeMillis
+                                                awaitPointerEventScope {
+                                                    var lastTapTime = 0L
+                                                    while (true) {
+                                                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                                                        val down = event.changes.firstOrNull() ?: continue
+                                                        if (down.pressed && !down.previousPressed) {
+                                                            val now = System.currentTimeMillis()
+                                                            val diff = now - lastTapTime
+                                                            if (diff in doubleTapMinTime..doubleTapTimeout) {
+                                                                // Double tap — consume and toggle zen
+                                                                down.consume()
+                                                                editorVm.toggleZen()
+                                                                lastTapTime = 0L
+                                                            } else {
+                                                                // Single tap — don't consume, let it reach the editor
+                                                                lastTapTime = now
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             }
                                     )
 
