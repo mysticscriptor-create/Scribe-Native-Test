@@ -108,26 +108,6 @@ fun HomeScreen(
         }
     }
 
-    // One-shot capture for dialogs on pre-API-31 devices
-    var dialogOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var dialogCaptured by remember { mutableStateOf(false) }
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-        val anyDialogOpen = showCreateDialog || bookToRename != null ||
-                bookToDelete != null || bookToChangeCover != null
-        LaunchedEffect(anyDialogOpen) {
-            if (anyDialogOpen && !dialogCaptured) {
-                dialogCaptured = true
-                val raw = BitmapBlur.captureOnly(view)
-                dialogOneShotBitmap = withContext(Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
-                }
-            } else if (!anyDialogOpen) {
-                dialogCaptured = false
-                dialogOneShotBitmap = null
-            }
-        }
-    }
-
     val repo = remember { ThemeDataStoreRepo(context) }
 
     // 0: Books, 1: Notes, 2: Statistics
@@ -176,6 +156,27 @@ fun HomeScreen(
     var bookToRename by remember { mutableStateOf<Book?>(null) }
     var bookToDelete by remember { mutableStateOf<Book?>(null) }
     var bookToChangeCover by remember { mutableStateOf<Book?>(null) }
+
+    // One-shot capture for dialogs on pre-API-31 devices
+    // Placed here so all dialog state vars above are already in scope
+    var dialogOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var dialogCaptured by remember { mutableStateOf(false) }
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        val anyDialogOpen = showCreateDialog || bookToRename != null ||
+                bookToDelete != null || bookToChangeCover != null
+        LaunchedEffect(anyDialogOpen) {
+            if (anyDialogOpen && !dialogCaptured) {
+                dialogCaptured = true
+                val raw = BitmapBlur.captureOnly(view)
+                dialogOneShotBitmap = withContext(Dispatchers.IO) {
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                }
+            } else if (!anyDialogOpen) {
+                dialogCaptured = false
+                dialogOneShotBitmap = null
+            }
+        }
+    }
 
     val coverPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()

@@ -140,21 +140,6 @@ fun MainEditorScreen(
             }
         }
 
-        // Dialog capture — independent of drawer state so closing a drawer before
-        // a dialog opens doesn't clear the bitmap on Android 10
-        val anyDialogOpen = showRenameDialog || showCreateNoteDialog || filePickerTargetSlot != null
-        LaunchedEffect(anyDialogOpen) {
-            if (anyDialogOpen && !dialogCaptured) {
-                dialogCaptured = true
-                val raw = BitmapBlur.captureOnly(view)
-                dialogOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
-                }
-            } else if (!anyDialogOpen) {
-                dialogCaptured = false
-                dialogOneShotBitmap = null
-            }
-        }
     }
 
     val activeNote by editorVm.activeNote.observeAsState()
@@ -198,6 +183,23 @@ fun MainEditorScreen(
     var showRenameDialog by remember { mutableStateOf(false) }
     var showCreateNoteDialog by remember { mutableStateOf(false) }
     var filePickerTargetSlot by remember { mutableStateOf<String?>(null) } // "top" or "bottom"
+
+    // Dialog capture — placed here so all three dialog state vars above are in scope
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        val anyDialogOpen = showRenameDialog || showCreateNoteDialog || filePickerTargetSlot != null
+        LaunchedEffect(anyDialogOpen) {
+            if (anyDialogOpen && !dialogCaptured) {
+                dialogCaptured = true
+                val raw = BitmapBlur.captureOnly(view)
+                dialogOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                }
+            } else if (!anyDialogOpen) {
+                dialogCaptured = false
+                dialogOneShotBitmap = null
+            }
+        }
+    }
 
     var editorRef by remember { mutableStateOf<ScribeEditText?>(null) }
     var loadedNoteId by remember { mutableStateOf<String?>(null) }
