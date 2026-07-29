@@ -101,14 +101,19 @@ fun autoTextColor(bg: Color): Color {
 }
 
 @Composable
-fun Modifier.frostedBar(hazeState: HazeState?): Modifier {
+fun localHasBgImage(): Boolean {
     val theme = LocalAppTheme.current
-    val solidSurface = LocalSolidSurface.current
-    val oneShotBitmap = LocalOneShotBitmap.current
     val frostedGlass = LocalFrostedGlass.current
-    val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
+    return theme?.backgroundImageUri?.isNotEmpty() == true &&
             (theme.bgMode == "image" || theme.bgMode == "blurred") &&
             frostedGlass
+}
+
+@Composable
+fun Modifier.frostedBar(hazeState: HazeState?): Modifier {
+    val solidSurface = LocalSolidSurface.current
+    val oneShotBitmap = LocalOneShotBitmap.current
+    val hasBgImage = localHasBgImage()
     return if (!hasBgImage) {
         this.background(solidSurface)
     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null) {
@@ -129,13 +134,9 @@ fun Modifier.frostedBar(hazeState: HazeState?): Modifier {
  */
 @Composable
 fun Modifier.frostedFab(hazeState: HazeState?): Modifier {
-    val theme = LocalAppTheme.current
     val solidSurface = LocalSolidSurface.current
     val oneShotBitmap = LocalOneShotBitmap.current
-    val frostedGlass = LocalFrostedGlass.current
-    val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
-            (theme.bgMode == "image" || theme.bgMode == "blurred") &&
-            frostedGlass
+    val hasBgImage = localHasBgImage()
     return if (!hasBgImage) {
         this
     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null) {
@@ -168,13 +169,9 @@ fun Modifier.frostedFab(hazeState: HazeState?): Modifier {
  */
 @Composable
 fun Modifier.frostedPanel(hazeState: HazeState?): Modifier {
-    val theme = LocalAppTheme.current
     val solidSurface = LocalSolidSurface.current
     val oneShotBitmap = LocalOneShotBitmap.current
-    val frostedGlass = LocalFrostedGlass.current
-    val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
-            (theme.bgMode == "image" || theme.bgMode == "blurred") &&
-            frostedGlass
+    val hasBgImage = localHasBgImage()
     return if (!hasBgImage) {
         this.background(solidSurface)
     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null) {
@@ -209,12 +206,8 @@ fun Modifier.frostedCard(
      *  Use for plain Box/Container callers that don't have their own background. */
     applyFallbackBackground: Boolean = false
 ): Modifier {
-    val theme = LocalAppTheme.current
     val solidSurface = LocalSolidSurface.current
-    val frostedGlass = LocalFrostedGlass.current
-    val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
-            (theme.bgMode == "image" || theme.bgMode == "blurred") &&
-            frostedGlass
+    val hasBgImage = localHasBgImage()
     val oneShotBitmap = LocalOneShotBitmap.current
     return if (!hasBgImage || hazeState == null) {
         this
@@ -254,11 +247,7 @@ fun FrostedDialog(
     val hazeState = LocalHazeState.current
     val solidSurface = LocalSolidSurface.current
     val oneShotBitmap = LocalOneShotBitmap.current
-    val theme = LocalAppTheme.current
-    val frostedGlass = LocalFrostedGlass.current
-    val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
-            (theme.bgMode == "image" || theme.bgMode == "blurred") &&
-            frostedGlass
+    val hasBgImage = localHasBgImage()
     val shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp)
 
     Box(
@@ -332,13 +321,9 @@ fun FrostedDialog(
  */
 @Composable
 fun frostedContainerColor(fallback: Color): Color {
-    val theme = LocalAppTheme.current
     val hazeState = LocalHazeState.current
     val oneShotBitmap = LocalOneShotBitmap.current
-    val frostedGlass = LocalFrostedGlass.current
-    val hasBgImage = theme?.backgroundImageUri?.isNotEmpty() == true &&
-            (theme.bgMode == "image" || theme.bgMode == "blurred") &&
-            frostedGlass
+    val hasBgImage = localHasBgImage()
     // Transparent so the frosted modifier (hazeEffect or one-shot bitmap) shows through
     val legacyReady = Build.VERSION.SDK_INT < Build.VERSION_CODES.S && oneShotBitmap != null
     val modernReady = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null
