@@ -95,6 +95,11 @@ data class AppTheme(
     val bgMode: String = "color", // "color" | "image" | "blurred"
     val blurIntensity: Float = 15f,
     val frostedGlassEnabled: Boolean = true,
+    /** When false, frosted glass shows pure blur with no surface tint overlay. */
+    val frostedTintEnabled: Boolean = true,
+    /** Blur radius (dp) for bars, drawers, dialogs in frosted glass mode.
+     *  API 31+: live via Haze. Pre-API-31: applied at theme-load time (one-shot bitmap). */
+    val frostedBlurRadius: Float = 15f,
     val textAlignment: String = "left", // "left" | "justified" | "center"
     val themeScope: String = "whole_app", // "editor_only" | "whole_app"
     val emoji: String? = null
