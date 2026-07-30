@@ -89,6 +89,16 @@ val LocalFrostedGlass = compositionLocalOf { true }
 val LocalOneShotBitmap = compositionLocalOf<Bitmap?> { null }
 
 /**
+ * Pre-blurred version of the background image, derived from the already-loaded
+ * Coil bitmap inside ScribeComposeTheme. Used by bars and FABs on API < 31 so
+ * they get a frosted look without needing a live screen capture.
+ *
+ * Null on API 31+ (Haze handles blurring natively) and when no background image
+ * is active. Never used by dialogs or drawers — those use [LocalOneShotBitmap].
+ */
+val LocalBarBlurBitmap = compositionLocalOf<Bitmap?> { null }
+
+/**
  * Always holds the fully-opaque theme surface color, even when a background image
  * is active and the color scheme's surface is set to alpha=0 for glass effects.
  * Use this for Dropdowns, Dialogs, and any popup that must never be see-through.
@@ -612,6 +622,7 @@ fun ScribeComposeTheme(
                 LocalScreenSize provides Pair(screenWidthPx, screenHeightPx),
                 LocalFrostedGlass provides resolvedTheme.frostedGlassEnabled,
                 LocalSolidSurface provides animSurface,
+                LocalBarBlurBitmap provides barBlurBitmap,
                 // One-shot bitmap starts null; screens set it via their own
                 // CompositionLocalProvider wrapping the drawer/dialog content.
                 LocalOneShotBitmap provides null
@@ -695,6 +706,53 @@ fun ScribeComposeTheme(
                                 ?.image
                                 ?.let { (it as? coil3.BitmapImage)?.bitmap }
                         } catch (_: Exception) { null }
+                    }
+                }
+
+                // ── Bar blur bitmap (API < 31 only) ──────────────────────────────
+                // Derived from bitmaps that Coil already loaded above — no extra
+                // request. Provided as LocalBarBlurBitmap for bars and FABs only.
+                // Dialogs and drawers are unaffected (they use LocalOneShotBitmap).
+                val barBlurBitmap by produceState<Bitmap?>(
+                    initialValue = null,
+                    key1 = bgUri,
+                    key2 = bgMode,
+                    key3 = softwareBlurredModel,   // ready when blurred mode loads
+                    key4 = softwareImageModel       // ready when image mode loads
+                ) {
+                    value = null
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S || !hasBgImage) {
+                        return@produceState  // Haze handles it natively on API 31+
+                    }
+                    value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        when {
+                            // blurred mode: softwareBlurredModel is already blurred
+                            bgMode == "blurred" && softwareBlurredModel != null ->
+                                softwareBlurredModel
+
+                            // image mode: softwareImageModel is sharp — blur it now
+                            bgMode == "image" && softwareImageModel != null ->
+                                BitmapBlur.blurBitmap(softwareImageModel!!, radius = 18)
+
+                            // fallback: load fresh if produceState fires before
+                            // softwareImageModel is ready (rare, first cold start)
+                            hasBgImage && bgUri != null -> {
+                                try {
+                                    val loader = coil3.ImageLoader(context)
+                                    val req = coil3.request.ImageRequest.Builder(context)
+                                        .data(bgUri)
+                                        .size(coil3.size.Size(800, 1422))
+                                        .allowHardware(false)
+                                        .build()
+                                    val bmp = (loader.execute(req) as? coil3.request.SuccessResult)
+                                        ?.image
+                                        ?.let { (it as? coil3.BitmapImage)?.bitmap }
+                                    bmp?.let { BitmapBlur.blurBitmap(it, radius = 18) }
+                                } catch (_: Exception) { null }
+                            }
+
+                            else -> null
+                        }
                     }
                 }
 
