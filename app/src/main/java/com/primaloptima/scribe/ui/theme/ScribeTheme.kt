@@ -716,6 +716,7 @@ fun ScribeComposeTheme(
                 bmp?.let {
                     val radiusPx = (blurIntensity * 0.8f).toInt().coerceIn(1, 25)
                     com.primaloptima.scribe.util.BitmapBlur.blurBitmap(it, radiusPx)
+                        .let { b -> com.primaloptima.scribe.util.BitmapBlur.applyFrostedGlassLook(b) }
                 }
             } catch (_: Exception) { null }
         }
@@ -769,6 +770,7 @@ fun ScribeComposeTheme(
                 // image mode: blur the sharp image now
                 bgMode == "image" && softwareImageModel != null ->
                     com.primaloptima.scribe.util.BitmapBlur.blurBitmap(softwareImageModel!!, radius = frostedBlurRadius.toInt().coerceIn(1, 25))
+                        .let { b -> com.primaloptima.scribe.util.BitmapBlur.applyFrostedGlassLook(b) }
 
                 // fallback: load fresh at screen aspect ratio (rare cold-start race)
                 hasBgImage && bgUri != null -> {
@@ -782,7 +784,7 @@ fun ScribeComposeTheme(
                         val bmp = (loader.execute(req) as? coil3.request.SuccessResult)
                             ?.image
                             ?.let { (it as? coil3.BitmapImage)?.bitmap }
-                        bmp?.let { com.primaloptima.scribe.util.BitmapBlur.blurBitmap(it, radius = frostedBlurRadius.toInt().coerceIn(1, 25)) }
+                        bmp?.let { com.primaloptima.scribe.util.BitmapBlur.blurBitmap(it, radius = frostedBlurRadius.toInt().coerceIn(1, 25)).let { b -> com.primaloptima.scribe.util.BitmapBlur.applyFrostedGlassLook(b) } }
                     } catch (_: Exception) { null }
                 }
 
