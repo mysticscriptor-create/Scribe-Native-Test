@@ -51,6 +51,71 @@ object BitmapBlur {
     }
 
     /**
+     * Post-processes a blurred bitmap to look like real frosted glass rather than
+     * a plain blur. Applies two things iOS/Haze do that most Android implementations miss:
+     *
+     *  1. Brightness + saturation boost — frosted glass lightens and slightly desaturates
+     *     the content behind it, giving it that milky, luminous quality.
+     *  2. Noise grain overlay — the fine grain texture is what makes glass *feel* like
+     *     glass instead of just "blurry". Haze calls this noiseFactor.
+     *
+     * Call this on the result of [blurBitmap] or [captureAndBlur] before displaying it
+     * as a panel/drawer/dialog background on pre-API-31 devices.
+     *
+     * @param src         Blurred bitmap (ARGB_8888). Modified in-place.
+     * @param brightness  How much to brighten (0f = no change, 0.15f = subtle lift).
+     * @param noiseAlpha  Opacity of grain overlay (0f = none, 0.04f = subtle, 0.08f = visible).
+     */
+    @WorkerThread
+    fun applyFrostedGlassLook(
+        src: Bitmap,
+        brightness: Float = 0.12f,
+        noiseAlpha: Float = 0.05f
+    ): Bitmap {
+        val w = src.width
+        val h = src.height
+        val pixels = IntArray(w * h)
+        src.getPixels(pixels, 0, w, 0, 0, w, h)
+
+        // 1. Brightness boost — lift each channel toward white by [brightness] fraction.
+        //    This is what makes blurred glass look luminous rather than muddy.
+        val lift = (brightness * 255).toInt().coerceIn(0, 60)
+        if (lift > 0) {
+            for (i in pixels.indices) {
+                val p = pixels[i]
+                val a = (p shr 24) and 0xFF
+                val r = ((p shr 16) and 0xFF + lift).coerceAtMost(255)
+                val g = ((p shr 8) and 0xFF + lift).coerceAtMost(255)
+                val b = (p and 0xFF + lift).coerceAtMost(255)
+                pixels[i] = (a shl 24) or (r shl 16) or (g shl 8) or b
+            }
+        }
+
+        // 2. Noise grain — add subtle random luminance variation per pixel.
+        //    Uses a fast LCG pseudo-random number generator (no allocation).
+        //    This is the single biggest visual difference between "blurry" and "glassy".
+        if (noiseAlpha > 0f) {
+            val noiseStrength = (noiseAlpha * 255).toInt().coerceIn(0, 30)
+            var seed = 0x12345678L
+            for (i in pixels.indices) {
+                seed = (seed * 1664525L + 1013904223L) and 0xFFFFFFFFL
+                val noise = ((seed shr 16) and 0xFFL).toInt() * noiseStrength / 255
+                val offset = noise - noiseStrength / 2
+
+                val p = pixels[i]
+                val a = (p shr 24) and 0xFF
+                val r = ((p shr 16) and 0xFF + offset).coerceIn(0, 255)
+                val g = ((p shr 8) and 0xFF + offset).coerceIn(0, 255)
+                val b = (p and 0xFF + offset).coerceIn(0, 255)
+                pixels[i] = (a shl 24) or (r shl 16) or (g shl 8) or b
+            }
+        }
+
+        src.setPixels(pixels, 0, w, 0, 0, w, h)
+        return src
+    }
+
+    /**
      * One-shot screen capture + blur for pre-Android-12 frosted glass on panels/dialogs.
      *
      * Captures the current window content via [View.drawToBitmap], optionally crops
