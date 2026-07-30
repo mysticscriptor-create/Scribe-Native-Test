@@ -87,6 +87,10 @@ data class AppTheme(
     val paddingVertical: Int,
     val maxWidth: Int,
     val backgroundImageUri: String? = null,
+    /** The original full-resolution image the user picked, before cropping.
+     *  Preserved so the user can re-crop later without quality loss, and so
+     *  the crop can be re-run at a different screen ratio if needed. */
+    val backgroundImageOriginalUri: String? = null,
     val backgroundImageOpacity: Float? = 0.35f,
     val bgMode: String = "color", // "color" | "image" | "blurred"
     val blurIntensity: Float = 15f,
