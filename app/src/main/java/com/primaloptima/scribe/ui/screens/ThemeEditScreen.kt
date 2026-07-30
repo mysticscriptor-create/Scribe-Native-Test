@@ -151,6 +151,7 @@ fun ThemeEditScreen(
         }
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
         topBar = {
@@ -748,23 +749,27 @@ fun ThemeEditScreen(
 
     // ── Crop Screen Overlay ───────────────────────────────────────────────────
     // Shown full-screen after the user picks a new background image.
-    // Lets them drag a crop window to choose which part of the image to display.
+    // Rendered inside a Box so it properly covers the Scaffold on all devices,
+    // including tablets, split-screen, and Android 15 windowing modes.
     if (showCropScreen && pendingCropUri != null) {
-        ImageCropScreen(
-            imageUri = pendingCropUri!!,
-            onConfirm = { croppedUri ->
-                bgOriginalUri = pendingCropUri  // preserve the full-res original
-                bgUri = croppedUri
-                if (bgMode == "color") bgMode = "image"
-                showCropScreen = false
-                pendingCropUri = null
-            },
-            onCancel = {
-                showCropScreen = false
-                pendingCropUri = null
-            }
-        )
+        Box(modifier = Modifier.fillMaxSize()) {
+            ImageCropScreen(
+                imageUri = pendingCropUri!!,
+                onConfirm = { croppedUri ->
+                    bgOriginalUri = pendingCropUri  // preserve the full-res original
+                    bgUri = croppedUri
+                    if (bgMode == "color") bgMode = "image"
+                    showCropScreen = false
+                    pendingCropUri = null
+                },
+                onCancel = {
+                    showCropScreen = false
+                    pendingCropUri = null
+                }
+            )
+        }
     }
+    } // end outer Box
 }
 
 @Composable
