@@ -98,15 +98,20 @@ fun HomeScreen(
     // Bars are always visible so we can't capture "just before" they appear.
     // Instead we capture once after the background image has had time to render
     // (a short delay lets AsyncImage finish its first draw), then reuse it.
-    // Keyed on the background URI so it refreshes whenever the theme changes.
+    // Keyed on bgUri + bgMode so it refreshes whenever the theme changes.
     val appTheme = LocalAppTheme.current
     val bgUri = appTheme?.backgroundImageUri
+    val bgMode = appTheme?.bgMode ?: "color"
+    // Must match the same condition ScribeTheme's localHasBgImage() uses,
+    // otherwise the capture fires when frostedBar won't use it (bgMode=="color")
+    // or doesn't fire when it should (bgMode=="image"/"blurred" with a uri).
+    val hasBgImage = !bgUri.isNullOrEmpty() && (bgMode == "image" || bgMode == "blurred")
     var barBlurBitmap by remember { mutableStateOf<Bitmap?>(null) }
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-        LaunchedEffect(bgUri) {
-            barBlurBitmap = null          // clear stale bitmap on theme change
-            if (!bgUri.isNullOrEmpty()) {
-                kotlinx.coroutines.delay(150) // wait for AsyncImage first draw
+        LaunchedEffect(bgUri, bgMode) {
+            barBlurBitmap = null          // clear stale bitmap on theme/bg change
+            if (hasBgImage) {
+                kotlinx.coroutines.delay(400) // wait for AsyncImage to finish first draw
                 val raw = BitmapBlur.captureOnly(view)
                 barBlurBitmap = withContext(Dispatchers.IO) {
                     raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
@@ -125,6 +130,25 @@ fun HomeScreen(
             } else if (drawerState.currentValue == DrawerValue.Closed) {
                 captured = false
                 oneShotBitmap = null
+            }
+        }
+    }
+    // One-shot bitmap for the right panel (same pattern as left drawer).
+    // Captured when rightPanelVisible becomes true — before the slide-in animation
+    // starts — so the panel's first frame already has a valid blur behind it.
+    var rightOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var rightCaptured by remember { mutableStateOf(false) }
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        LaunchedEffect(rightPanelVisible) {
+            if (rightPanelVisible && !rightCaptured) {
+                rightCaptured = true
+                val raw = BitmapBlur.captureOnly(view)
+                rightOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                }
+            } else if (!rightPanelVisible) {
+                rightCaptured = false
+                rightOneShotBitmap = null
             }
         }
     }
@@ -645,6 +669,7 @@ fun HomeScreen(
                     val totalWords = remember(allNotes) {
                         allNotes.sumOf { n -> n.content.split("\\s+".toRegex()).count { it.isNotBlank() } }
                     }
+                    CompositionLocalProvider(LocalOneShotBitmap provides rightOneShotBitmap) {
                     Column(
                         modifier = Modifier
                             .fillMaxHeight()
@@ -693,6 +718,7 @@ fun HomeScreen(
                             Text("Themes")
                         }
                     }
+                    } // end CompositionLocalProvider(rightOneShotBitmap for right panel)
                 }
             }
         }
