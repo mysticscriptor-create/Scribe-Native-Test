@@ -95,6 +95,8 @@ fun ThemeEditScreen(
     var bgOpacity by remember(originalTheme) { mutableFloatStateOf(originalTheme.backgroundImageOpacity ?: 0.35f) }
     var blurIntensity by remember(originalTheme) { mutableFloatStateOf(originalTheme.blurIntensity) }
     var frostedGlassEnabled by remember(originalTheme) { mutableStateOf(originalTheme.frostedGlassEnabled) }
+    var frostedTintEnabled by remember(originalTheme) { mutableStateOf(originalTheme.frostedTintEnabled) }
+    var frostedBlurRadius by remember(originalTheme) { mutableFloatStateOf(originalTheme.frostedBlurRadius) }
 
     var fontFamily by remember(originalTheme) { mutableStateOf(originalTheme.fontFamily) }
     var fontSize by remember(originalTheme) { mutableFloatStateOf(originalTheme.fontSize.toFloat()) }
@@ -186,6 +188,8 @@ fun ThemeEditScreen(
                             bgMode = bgMode,
                             blurIntensity = blurIntensity,
                             frostedGlassEnabled = frostedGlassEnabled,
+                            frostedTintEnabled = frostedTintEnabled,
+                            frostedBlurRadius = frostedBlurRadius,
                             textAlignment = textAlignment,
                             themeScope = themeScope,
                             emoji = emoji,
@@ -358,6 +362,45 @@ fun ThemeEditScreen(
                                 Switch(
                                     checked = frostedGlassEnabled,
                                     onCheckedChange = { frostedGlassEnabled = it }
+                                )
+                            }
+
+                            // Frosted glass sub-settings — only visible when frosted glass is on
+                            if (frostedGlassEnabled) {
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+
+                                // Tint toggle
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Glass Tint", fontWeight = FontWeight.Medium)
+                                        Text(
+                                            "Overlay a surface colour on the blur. Turn off for pure glass.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                        )
+                                    }
+                                    Spacer(Modifier.width(12.dp))
+                                    Switch(
+                                        checked = frostedTintEnabled,
+                                        onCheckedChange = { frostedTintEnabled = it }
+                                    )
+                                }
+
+                                // Blur radius slider
+                                Text(
+                                    "Glass Blur: ${frostedBlurRadius.toInt()} dp" +
+                                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S)
+                                            " (applies on next theme load)" else "",
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Slider(
+                                    value = frostedBlurRadius,
+                                    onValueChange = { frostedBlurRadius = it },
+                                    valueRange = 0f..40f
                                 )
                             }
                         }
@@ -610,6 +653,8 @@ fun ThemeEditScreen(
                         bgMode = bgMode,
                         blurIntensity = blurIntensity,
                         frostedGlassEnabled = frostedGlassEnabled,
+                        frostedTintEnabled = frostedTintEnabled,
+                        frostedBlurRadius = frostedBlurRadius,
                         textAlignment = textAlignment,
                         themeScope = themeScope,
                         emoji = emoji,
@@ -659,6 +704,8 @@ fun ThemeEditScreen(
                                 bgMode = bgMode,
                                 blurIntensity = blurIntensity,
                                 frostedGlassEnabled = frostedGlassEnabled,
+                                frostedTintEnabled = frostedTintEnabled,
+                                frostedBlurRadius = frostedBlurRadius,
                                 textAlignment = textAlignment,
                                 themeScope = themeScope,
                                 emoji = emoji,
