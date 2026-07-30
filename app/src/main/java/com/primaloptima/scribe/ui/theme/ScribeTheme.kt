@@ -643,13 +643,11 @@ fun ScribeComposeTheme(
             bgUri != null
 
     // ── Aspect-ratio-aware bitmap sizes ──────────────────────────────────────
-    // The background AsyncImage uses ContentScale.Crop — Coil fills the screen
-    // by cropping the image to the screen's exact aspect ratio. If we load the
-    // blur bitmap at a different aspect ratio (e.g. 800×800 square), Coil's
-    // internal downscaling produces a different crop region, making the blur
-    // and the visible background look out of sync.
-    // Fix: load all blur bitmaps at the actual screen aspect ratio so they
-    // receive the same crop that AsyncImage does.
+    // The background AsyncImage now uses ContentScale.FillBounds — the saved
+    // cropped JPEG is already exactly the screen's aspect ratio, so FillBounds
+    // stretches it to fill without any re-cropping or distortion.
+    // Blur bitmaps are still loaded at screen aspect ratio so that the blur
+    // and the visible background stay in sync across API levels.
     val blurLoadW = (screenWidthPx * 0.5f).toInt().coerceAtLeast(1)
     val blurLoadH = (screenHeightPx * 0.5f).toInt().coerceAtLeast(1)
 
@@ -787,7 +785,7 @@ fun ScribeComposeTheme(
                         AsyncImage(
                             model = imageModel,
                             contentDescription = null,
-                            contentScale = ContentScale.Crop,
+                            contentScale = ContentScale.FillBounds,
                             modifier = Modifier
                                 .fillMaxSize()
                                 .hazeSource(state = hazeState)
