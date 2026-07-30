@@ -67,11 +67,8 @@ import com.primaloptima.scribe.util.model.AppTheme
 import com.primaloptima.scribe.viewmodel.ThemeViewModel
 import java.io.File
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalDensity
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -94,6 +91,7 @@ fun ThemeEditScreen(
 
     var bgMode by remember(originalTheme) { mutableStateOf(originalTheme.bgMode) }
     var bgUri by remember(originalTheme) { mutableStateOf(originalTheme.backgroundImageUri) }
+    var bgOriginalUri by remember(originalTheme) { mutableStateOf(originalTheme.backgroundImageOriginalUri) }
     var bgOpacity by remember(originalTheme) { mutableFloatStateOf(originalTheme.backgroundImageOpacity ?: 0.35f) }
     var blurIntensity by remember(originalTheme) { mutableFloatStateOf(originalTheme.blurIntensity) }
     var frostedGlassEnabled by remember(originalTheme) { mutableStateOf(originalTheme.frostedGlassEnabled) }
@@ -182,6 +180,7 @@ fun ThemeEditScreen(
                             paddingHorizontal = sideMargins.toInt(),
                             fontFamily = fontFamily,
                             backgroundImageUri = bgUri,
+                            backgroundImageOriginalUri = bgOriginalUri,
                             backgroundImageOpacity = bgOpacity,
                             bgMode = bgMode,
                             blurIntensity = blurIntensity,
@@ -605,6 +604,7 @@ fun ThemeEditScreen(
                         paddingHorizontal = sideMargins.toInt(),
                         fontFamily = fontFamily,
                         backgroundImageUri = bgUri,
+                        backgroundImageOriginalUri = bgOriginalUri,
                         backgroundImageOpacity = bgOpacity,
                         bgMode = bgMode,
                         blurIntensity = blurIntensity,
@@ -653,6 +653,7 @@ fun ThemeEditScreen(
                                 paddingHorizontal = sideMargins.toInt(),
                                 fontFamily = fontFamily,
                                 backgroundImageUri = bgUri,
+                                backgroundImageOriginalUri = bgOriginalUri,
                                 backgroundImageOpacity = bgOpacity,
                                 bgMode = bgMode,
                                 blurIntensity = blurIntensity,
@@ -752,6 +753,7 @@ fun ThemeEditScreen(
         ImageCropScreen(
             imageUri = pendingCropUri!!,
             onConfirm = { croppedUri ->
+                bgOriginalUri = pendingCropUri  // preserve the full-res original
                 bgUri = croppedUri
                 if (bgMode == "color") bgMode = "image"
                 showCropScreen = false
@@ -1169,28 +1171,20 @@ private fun exportThemeJson(context: Context, theme: AppTheme) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Image Crop Screen
 //
-// Full-screen overlay that lets the user drag a crop window over their chosen
-// background image. On confirm, the selected region is cropped from the file
-// on disk and saved as a new file — the returned URI replaces bgUri in the
-// theme editor.
+// Full-screen overlay that lets the user position and move a crop window over
+// their chosen background image.
 //
-// No external library required — uses pure Compose touch gestures.
+// Key behaviours:
+//  • The crop box is permanently locked to the current screen's aspect ratio —
+//    the user cannot change its shape, only move it.
+//  • The crop box cannot be dragged outside the image bounds.
+//  • Intrinsic image dimensions are decoded up-front (bounds-only, no full
+//    bitmap load) so letterbox/pillarbox math is always correct.
+//  • The saved JPEG is scaled to exact screen pixels so ContentScale.FillBounds
+//    in ScribeTheme renders it with zero distortion and zero re-crop.
+//  • The bottom bar sits above the system navigation bar via navigationBars inset.
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
-/**
- * Full-screen crop UI for picking which region of a background image to display.
- *
- * Key design decisions:
- * 1. The crop box is locked to the device's exact screen aspect ratio — no free-form
- *    resize. This guarantees the saved bitmap fills the screen perfectly with no
- *    secondary re-crop by ContentScale.Crop in ScribeTheme.
- * 2. Crop fractions (cropLeft/Top) are relative to the *visible image rect* inside
- *    the Fit-scaled view, not the full display. This makes the save math exact.
- * 3. The crop box cannot be dragged outside the image (clamped to 0..1 in image space).
- * 4. Bottom bar respects system navigation insets (WindowInsets.navigationBars).
- * 5. Corner handles are larger (56dp touch radius) for comfortable use.
- */
-@OptIn(ExperimentalLayoutApi::class)
 private fun ImageCropScreen(
     imageUri: String,
     onConfirm: (croppedUri: String) -> Unit,
@@ -1198,277 +1192,200 @@ private fun ImageCropScreen(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
+    val view = androidx.compose.ui.platform.LocalView.current
 
-    // Detect screen dimensions to lock the crop box aspect ratio.
-    val configuration = LocalConfiguration.current
-    val screenWidthPx  = with(LocalDensity.current) {
-        configuration.screenWidthDp.dp.roundToPx().toFloat()
-    }
-    val screenHeightPx = with(LocalDensity.current) {
-        configuration.screenHeightDp.dp.roundToPx().toFloat()
-    }
-    // The aspect ratio the crop box must maintain — same as the device screen.
-    val targetAspect = screenWidthPx / screenHeightPx.coerceAtLeast(1f)
+    // Screen pixel dimensions — used to lock the crop aspect ratio and to
+    // scale the saved bitmap to exactly the right size.
+    val screenW = remember(view) { view.resources.displayMetrics.widthPixels.toFloat() }
+    val screenH = remember(view) { view.resources.displayMetrics.heightPixels.toFloat() }
+    val screenAspect = screenW / screenH.coerceAtLeast(1f)
 
-    // cropLeft/cropTop are fractions (0..1) of the *visible image* within the Fit layout.
-    // cropRight/cropBottom are derived from these + the fixed aspect ratio, so we only
-    // store the top-left + width to avoid them drifting apart.
-    //
-    // Initial crop: centered, filling as much of the image as possible at screen aspect ratio.
-    // If the image is wider than the target ratio, limit by height (cropH = 1.0, derive cropW).
-    // If the image is taller, limit by width (cropW = 1.0, derive cropH).
-    // These are initialized after we know the image bitmap size; start with a sensible default.
-    var cropLeft  by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
-    var cropTop   by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
-    // cropW is the width of the crop box as a fraction of the visible image width.
-    // cropH = cropW / targetAspect * imageAspect (so it matches screen ratio in pixel space).
-    // We store cropW and derive cropH every time.
-    var cropW by remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
+    // Real intrinsic dimensions of the source image, decoded in the background
+    // (inJustDecodeBounds = true — no full bitmap allocated).
+    // Used for correct letterbox/pillarbox geometry in both the overlay Canvas
+    // and the touch handler.
+    var intrinsicW by remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
+    var intrinsicH by remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
 
-    // Actual image bitmap dimensions — needed to compute cropH correctly.
-    var bitmapW by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
-    var bitmapH by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
-
-    // imageLayoutSize: the full display Box size (fills the screen).
-    var imageLayoutSize by remember {
-        androidx.compose.runtime.mutableStateOf(androidx.compose.ui.unit.IntSize.Zero)
-    }
-
-    // Load the bitmap dimensions once to initialise the crop box.
-    androidx.compose.runtime.LaunchedEffect(imageUri) {
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    LaunchedEffect(imageUri) {
+        withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                val opts = android.graphics.BitmapFactory.Options().apply {
+                    inJustDecodeBounds = true
+                }
                 val src = android.net.Uri.parse(imageUri)
                 val stream = context.contentResolver.openInputStream(src)
                     ?: java.io.File(imageUri.removePrefix("file://")).inputStream()
                 android.graphics.BitmapFactory.decodeStream(stream, null, opts)
                 stream.close()
-                bitmapW = opts.outWidth.toFloat().coerceAtLeast(1f)
-                bitmapH = opts.outHeight.toFloat().coerceAtLeast(1f)
-            } catch (_: Exception) {}
-        }
-        // Once we know bitmap dimensions, set initial crop to fill as much as possible.
-        if (bitmapW > 0f && bitmapH > 0f) {
-            val imgAspect = bitmapW / bitmapH
-            // cropH in image-fraction space = cropW * (targetAspect⁻¹) * imgAspect⁻¹
-            // We want cropH ≤ 1 and cropW ≤ 1.
-            // If we set cropW = 1, then cropH = 1/targetAspect * imgAspect... check ≤ 1.
-            val cropHIfFullWidth = imgAspect / targetAspect  // = (bitmapW/bitmapH) / (screenW/screenH)
-            if (cropHIfFullWidth <= 1f) {
-                cropW = 1f
-                cropTop  = (1f - cropHIfFullWidth) / 2f
-                cropLeft = 0f
-            } else {
-                val cropWIfFullHeight = targetAspect / imgAspect
-                cropW   = cropWIfFullHeight.coerceIn(0.1f, 1f)
-                cropTop = 0f
-                cropLeft = (1f - cropW) / 2f
-            }
+                if (opts.outWidth > 0 && opts.outHeight > 0) {
+                    intrinsicW = opts.outWidth.toFloat()
+                    intrinsicH = opts.outHeight.toFloat()
+                }
+            } catch (_: Exception) { /* keep defaults */ }
         }
     }
 
-    // Derived crop height in image-fraction space.
-    // cropH * bitmapH / (cropW * bitmapW) == 1/targetAspect
-    // => cropH = cropW * bitmapW / (bitmapH * targetAspect)
-    val cropH: Float get() {
-        if (bitmapW <= 0f || bitmapH <= 0f) return cropW / targetAspect
-        return (cropW * bitmapW) / (bitmapH * targetAspect)
+    // Crop box is a single moveable rectangle whose aspect ratio is fixed to
+    // screenAspect.  Stored as the top-left corner fraction (0..1) within the
+    // displayed image rect, plus the box width fraction.
+    // boxW is chosen so the box fits as large as possible inside the image.
+    val initialBoxW = remember(screenAspect) {
+        // Maximum width such that boxH = boxW / screenAspect <= 1.0
+        if (screenAspect >= 1f) 1f else screenAspect
+    }
+    val initialBoxH = remember(initialBoxW, screenAspect) {
+        initialBoxW / screenAspect
     }
 
-    // Track drag mode
-    var dragging by remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    // Top-left corner of the crop box, as fractions of the image's displayed size.
+    var boxLeft by remember { androidx.compose.runtime.mutableFloatStateOf((1f - initialBoxW) / 2f) }
+    var boxTop  by remember { androidx.compose.runtime.mutableFloatStateOf((1f - initialBoxH) / 2f) }
+
+    // Derived right/bottom — never stored separately so aspect ratio can't drift.
+    val boxW = initialBoxW
+    val boxH = initialBoxH
+
+    var isDraggingBox by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var dragStartBoxLeft by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    var dragStartBoxTop  by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+
     var isSaving by remember { androidx.compose.runtime.mutableStateOf(false) }
+
+    // Shared helper: compute the image's displayed rect within a given display size,
+    // accounting for ContentScale.Fit letterboxing/pillarboxing.
+    // Returns (imgX, imgY, imgW, imgH) in display pixels.
+    fun imageRect(displayW: Float, displayH: Float): FloatArray {
+        val imageAspect = intrinsicW / intrinsicH.coerceAtLeast(1f)
+        val viewAspect  = displayW / displayH.coerceAtLeast(1f)
+        return if (imageAspect > viewAspect) {
+            // Letterbox: image fills width, black bars top/bottom
+            val w = displayW
+            val h = displayW / imageAspect
+            floatArrayOf((displayW - w) / 2f, (displayH - h) / 2f, w, h)
+        } else {
+            // Pillarbox: image fills height, black bars left/right
+            val h = displayH
+            val w = displayH * imageAspect
+            floatArrayOf((displayW - w) / 2f, (displayH - h) / 2f, w, h)
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // ── Full-screen image (Fit keeps letterboxing/pillarboxing visible) ──
+        // Full-screen image preview (ContentScale.Fit shows the whole image)
         AsyncImage(
             model = imageUri,
             contentDescription = null,
             contentScale = ContentScale.Fit,
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // Crop overlay — dimming + border + handles + rule-of-thirds grid
+        androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+            val (imgX, imgY, imgW, imgH) = imageRect(size.width, size.height)
+
+            val cL = imgX + boxLeft       * imgW
+            val cT = imgY + boxTop        * imgH
+            val cR = imgX + (boxLeft + boxW) * imgW
+            val cB = imgY + (boxTop  + boxH) * imgH
+
+            val dimColor = androidx.compose.ui.graphics.Color(0x99000000)
+            // Dim everything outside the crop box
+            drawRect(dimColor, topLeft = androidx.compose.ui.geometry.Offset(0f, 0f),
+                size = androidx.compose.ui.geometry.Size(size.width, cT))
+            drawRect(dimColor, topLeft = androidx.compose.ui.geometry.Offset(0f, cB),
+                size = androidx.compose.ui.geometry.Size(size.width, size.height - cB))
+            drawRect(dimColor, topLeft = androidx.compose.ui.geometry.Offset(0f, cT),
+                size = androidx.compose.ui.geometry.Size(cL, cB - cT))
+            drawRect(dimColor, topLeft = androidx.compose.ui.geometry.Offset(cR, cT),
+                size = androidx.compose.ui.geometry.Size(size.width - cR, cB - cT))
+
+            // Crop border
+            val borderColor = androidx.compose.ui.graphics.Color.White
+            drawRect(
+                borderColor,
+                topLeft = androidx.compose.ui.geometry.Offset(cL, cT),
+                size = androidx.compose.ui.geometry.Size(cR - cL, cB - cT),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f)
+            )
+
+            // Corner handles — larger visual size (40f) for easier grabbing
+            val handleSize = 40f
+            val handleStrokeW = 5f
+            // TL
+            drawLine(borderColor, androidx.compose.ui.geometry.Offset(cL, cT + handleSize), androidx.compose.ui.geometry.Offset(cL, cT), strokeWidth = handleStrokeW)
+            drawLine(borderColor, androidx.compose.ui.geometry.Offset(cL, cT), androidx.compose.ui.geometry.Offset(cL + handleSize, cT), strokeWidth = handleStrokeW)
+            // TR
+            drawLine(borderColor, androidx.compose.ui.geometry.Offset(cR - handleSize, cT), androidx.compose.ui.geometry.Offset(cR, cT), strokeWidth = handleStrokeW)
+            drawLine(borderColor, androidx.compose.ui.geometry.Offset(cR, cT), androidx.compose.ui.geometry.Offset(cR, cT + handleSize), strokeWidth = handleStrokeW)
+            // BL
+            drawLine(borderColor, androidx.compose.ui.geometry.Offset(cL, cB - handleSize), androidx.compose.ui.geometry.Offset(cL, cB), strokeWidth = handleStrokeW)
+            drawLine(borderColor, androidx.compose.ui.geometry.Offset(cL, cB), androidx.compose.ui.geometry.Offset(cL + handleSize, cB), strokeWidth = handleStrokeW)
+            // BR
+            drawLine(borderColor, androidx.compose.ui.geometry.Offset(cR - handleSize, cB), androidx.compose.ui.geometry.Offset(cR, cB), strokeWidth = handleStrokeW)
+            drawLine(borderColor, androidx.compose.ui.geometry.Offset(cR, cB), androidx.compose.ui.geometry.Offset(cR, cB - handleSize), strokeWidth = handleStrokeW)
+
+            // Rule-of-thirds grid
+            val thirdW = (cR - cL) / 3f
+            val thirdH = (cB - cT) / 3f
+            val gridColor = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.25f)
+            drawLine(gridColor, androidx.compose.ui.geometry.Offset(cL + thirdW, cT), androidx.compose.ui.geometry.Offset(cL + thirdW, cB), strokeWidth = 1f)
+            drawLine(gridColor, androidx.compose.ui.geometry.Offset(cL + thirdW * 2, cT), androidx.compose.ui.geometry.Offset(cL + thirdW * 2, cB), strokeWidth = 1f)
+            drawLine(gridColor, androidx.compose.ui.geometry.Offset(cL, cT + thirdH), androidx.compose.ui.geometry.Offset(cR, cT + thirdH), strokeWidth = 1f)
+            drawLine(gridColor, androidx.compose.ui.geometry.Offset(cL, cT + thirdH * 2), androidx.compose.ui.geometry.Offset(cR, cT + thirdH * 2), strokeWidth = 1f)
+        }
+
+        // Touch handler — drag to reposition the crop box
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .onGloballyPositioned { coords ->
-                    imageLayoutSize = coords.size
+                .pointerInput(intrinsicW, intrinsicH) {
+                    val displayW = size.width.toFloat()
+                    val displayH = size.height.toFloat()
+
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            val (imgX, imgY, imgW, imgH) = imageRect(displayW, displayH)
+                            val cL = imgX + boxLeft       * imgW
+                            val cT = imgY + boxTop        * imgH
+                            val cR = imgX + (boxLeft + boxW) * imgW
+                            val cB = imgY + (boxTop  + boxH) * imgH
+
+                            // Start a drag if the touch is inside the crop box
+                            isDraggingBox = offset.x in cL..cR && offset.y in cT..cB
+                            if (isDraggingBox) {
+                                dragStartBoxLeft = boxLeft
+                                dragStartBoxTop  = boxTop
+                            }
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            if (!isDraggingBox) return@detectDragGestures
+
+                            val (_, _, imgW, imgH) = imageRect(displayW, displayH)
+                            val dx = dragAmount.x / imgW
+                            val dy = dragAmount.y / imgH
+
+                            // Clamp so the box never moves outside the image (0..1 space)
+                            boxLeft = (boxLeft + dx).coerceIn(0f, (1f - boxW).coerceAtLeast(0f))
+                            boxTop  = (boxTop  + dy).coerceIn(0f, (1f - boxH).coerceAtLeast(0f))
+                        },
+                        onDragEnd = { isDraggingBox = false }
+                    )
                 }
         )
 
-        // ── Crop overlay + handles ─────────────────────────────────────────
-        if (imageLayoutSize.width > 0 && bitmapW > 0f) {
-            // Helper: compute the visible image rect within the Fit layout.
-            // Returns [imgX, imgY, imgW, imgH] in display pixels.
-            fun imageRect(displayW: Float, displayH: Float): FloatArray {
-                val imgAspect = bitmapW / bitmapH
-                val viewAspect = displayW / displayH.coerceAtLeast(1f)
-                return if (imgAspect > viewAspect) {
-                    // Letterbox top/bottom
-                    val w = displayW; val h = displayW / imgAspect
-                    floatArrayOf((displayW - w) / 2f, (displayH - h) / 2f, w, h)
-                } else {
-                    // Pillarbox left/right
-                    val h = displayH; val w = displayH * imgAspect
-                    floatArrayOf((displayW - w) / 2f, (displayH - h) / 2f, w, h)
-                }
-            }
-
-            androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
-                val (imgX, imgY, imgW, imgH) = imageRect(size.width, size.height).let {
-                    arrayOf(it[0], it[1], it[2], it[3])
-                }
-
-                val cL = imgX + cropLeft       * imgW
-                val cT = imgY + cropTop        * imgH
-                val cR = imgX + (cropLeft + cropW) * imgW
-                val cB = imgY + (cropTop  + cropH) * imgH
-
-                val dimColor = androidx.compose.ui.graphics.Color(0xAA000000)
-                drawRect(dimColor, topLeft = androidx.compose.ui.geometry.Offset(0f, 0f),
-                    size = androidx.compose.ui.geometry.Size(size.width, cT))
-                drawRect(dimColor, topLeft = androidx.compose.ui.geometry.Offset(0f, cB),
-                    size = androidx.compose.ui.geometry.Size(size.width, size.height - cB))
-                drawRect(dimColor, topLeft = androidx.compose.ui.geometry.Offset(0f, cT),
-                    size = androidx.compose.ui.geometry.Size(cL, cB - cT))
-                drawRect(dimColor, topLeft = androidx.compose.ui.geometry.Offset(cR, cT),
-                    size = androidx.compose.ui.geometry.Size(size.width - cR, cB - cT))
-
-                // Crop border
-                val white = androidx.compose.ui.graphics.Color.White
-                drawRect(white,
-                    topLeft = androidx.compose.ui.geometry.Offset(cL, cT),
-                    size = androidx.compose.ui.geometry.Size(cR - cL, cB - cT),
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.5f))
-
-                // Corner handles — large L-shapes (56dp touch zone, 32px drawn arm)
-                val arm = 32f
-                val sw  = 5f
-                // TL
-                drawLine(white, androidx.compose.ui.geometry.Offset(cL, cT + arm), androidx.compose.ui.geometry.Offset(cL, cT), sw)
-                drawLine(white, androidx.compose.ui.geometry.Offset(cL, cT), androidx.compose.ui.geometry.Offset(cL + arm, cT), sw)
-                // TR
-                drawLine(white, androidx.compose.ui.geometry.Offset(cR - arm, cT), androidx.compose.ui.geometry.Offset(cR, cT), sw)
-                drawLine(white, androidx.compose.ui.geometry.Offset(cR, cT), androidx.compose.ui.geometry.Offset(cR, cT + arm), sw)
-                // BL
-                drawLine(white, androidx.compose.ui.geometry.Offset(cL, cB - arm), androidx.compose.ui.geometry.Offset(cL, cB), sw)
-                drawLine(white, androidx.compose.ui.geometry.Offset(cL, cB), androidx.compose.ui.geometry.Offset(cL + arm, cB), sw)
-                // BR
-                drawLine(white, androidx.compose.ui.geometry.Offset(cR - arm, cB), androidx.compose.ui.geometry.Offset(cR, cB), sw)
-                drawLine(white, androidx.compose.ui.geometry.Offset(cR, cB), androidx.compose.ui.geometry.Offset(cR, cB - arm), sw)
-
-                // Rule-of-thirds grid
-                val thirdW = (cR - cL) / 3f; val thirdH = (cB - cT) / 3f
-                val grid = white.copy(alpha = 0.25f)
-                for (i in 1..2) {
-                    drawLine(grid, androidx.compose.ui.geometry.Offset(cL + thirdW * i, cT), androidx.compose.ui.geometry.Offset(cL + thirdW * i, cB), 1f)
-                    drawLine(grid, androidx.compose.ui.geometry.Offset(cL, cT + thirdH * i), androidx.compose.ui.geometry.Offset(cR, cT + thirdH * i), 1f)
-                }
-            }
-
-            // Invisible drag-handler Box
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(imageLayoutSize, bitmapW, bitmapH, cropW) {
-                        val displayW = size.width.toFloat()
-                        val displayH = size.height.toFloat()
-                        val (imgX, imgY, imgW, imgH) = imageRect(displayW, displayH).let {
-                            arrayOf(it[0], it[1], it[2], it[3])
-                        }
-                        val handleRadius = 56f  // large touch target in px
-
-                        detectDragGestures(
-                            onDragStart = { offset ->
-                                val x = offset.x; val y = offset.y
-                                val cL = imgX + cropLeft           * imgW
-                                val cT_ = imgY + cropTop           * imgH
-                                val cR = imgX + (cropLeft + cropW) * imgW
-                                val cB = imgY + (cropTop  + cropH) * imgH
-                                fun dist(ax: Float, ay: Float) =
-                                    kotlin.math.sqrt((x - ax) * (x - ax) + (y - ay) * (y - ay))
-                                dragging = when {
-                                    dist(cL, cT_) < handleRadius -> "tl"
-                                    dist(cR, cT_) < handleRadius -> "tr"
-                                    dist(cL, cB)  < handleRadius -> "bl"
-                                    dist(cR, cB)  < handleRadius -> "br"
-                                    x in cL..cR && y in cT_..cB -> "move"
-                                    else -> null
-                                }
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                // dx/dy as fractions of the visible image size
-                                val dx = dragAmount.x / imgW
-                                val dy = dragAmount.y / imgH
-                                val currentCropH = cropH  // snapshot
-
-                                when (dragging) {
-                                    // For corner drags: only cropW changes (aspect ratio locked).
-                                    // We pivot on the opposite corner, then reclamp.
-                                    "tl" -> {
-                                        // Dragging TL: left and top move together maintaining ratio.
-                                        // Use whichever drag axis gives the larger resize.
-                                        val dw = -dx  // moving left increases width
-                                        val newW = (cropW + dw).coerceIn(0.1f, 1f)
-                                        val newH = cropH * (newW / cropW)  // proportional
-                                        // Pivot on bottom-right
-                                        val newLeft = (cropLeft + cropW) - newW
-                                        val newTop  = (cropTop  + currentCropH) - newH
-                                        if (newLeft >= 0f && newTop >= 0f && newLeft + newW <= 1f && newTop + newH <= 1f) {
-                                            cropW    = newW
-                                            cropLeft = newLeft
-                                            cropTop  = newTop
-                                        }
-                                    }
-                                    "tr" -> {
-                                        val newW = (cropW + dx).coerceIn(0.1f, 1f)
-                                        val newH = cropH * (newW / cropW)
-                                        val newTop = (cropTop + currentCropH) - newH
-                                        if (cropLeft + newW <= 1f && newTop >= 0f && newTop + newH <= 1f) {
-                                            cropW   = newW
-                                            cropTop = newTop
-                                        }
-                                    }
-                                    "bl" -> {
-                                        val dw = -dx
-                                        val newW = (cropW + dw).coerceIn(0.1f, 1f)
-                                        val newLeft = (cropLeft + cropW) - newW
-                                        val newH = cropH * (newW / cropW)
-                                        if (newLeft >= 0f && cropTop + newH <= 1f) {
-                                            cropW    = newW
-                                            cropLeft = newLeft
-                                        }
-                                    }
-                                    "br" -> {
-                                        val newW = (cropW + dx).coerceIn(0.1f, 1f)
-                                        val newH = cropH * (newW / cropW)
-                                        if (cropLeft + newW <= 1f && cropTop + newH <= 1f) {
-                                            cropW = newW
-                                        }
-                                    }
-                                    "move" -> {
-                                        val newL = (cropLeft + dx).coerceIn(0f, 1f - cropW)
-                                        val newT = (cropTop  + dy).coerceIn(0f, 1f - currentCropH)
-                                        cropLeft = newL
-                                        cropTop  = newT
-                                    }
-                                }
-                            },
-                            onDragEnd = { dragging = null }
-                        )
-                    }
-            )
-        }
-
-        // ── Top bar: back + title ──────────────────────────────────────────
+        // Top bar: back arrow + title
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.TopCenter)
-                .windowInsetsPadding(WindowInsets.statusBars)
                 .background(Color.Black.copy(alpha = 0.55f))
+                .windowInsetsPadding(WindowInsets.statusBars)
                 .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1484,7 +1401,7 @@ private fun ImageCropScreen(
             )
         }
 
-        // ── Bottom bar: hint + confirm — above nav bar ─────────────────────
+        // Bottom bar: hint + confirm button — always above navigation bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1496,7 +1413,7 @@ private fun ImageCropScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                "Drag corners or box to adjust",
+                "Drag the box to choose a region",
                 color = Color.White.copy(alpha = 0.7f),
                 fontSize = 12.sp,
                 modifier = Modifier.weight(1f)
@@ -1510,6 +1427,7 @@ private fun ImageCropScreen(
                             val result = withContext(kotlinx.coroutines.Dispatchers.IO) {
                                 try {
                                     val src = android.net.Uri.parse(imageUri)
+                                    // Decode the full-resolution source bitmap
                                     val inputStream = context.contentResolver.openInputStream(src)
                                         ?: java.io.File(imageUri.removePrefix("file://")).inputStream()
                                     val full = android.graphics.BitmapFactory.decodeStream(inputStream)
@@ -1519,28 +1437,28 @@ private fun ImageCropScreen(
                                     val fw = full.width.toFloat()
                                     val fh = full.height.toFloat()
 
-                                    // cropLeft/cropTop/cropW/cropH are fractions of the
-                                    // *visible image* within the Fit view — which equals
-                                    // the full bitmap. So multiplying directly by fw/fh
-                                    // gives the correct pixel region. No letterbox offset
-                                    // needed here because these fractions already exclude it.
-                                    val pixX = (cropLeft * fw).toInt().coerceIn(0, full.width - 1)
-                                    val pixY = (cropTop  * fh).toInt().coerceIn(0, full.height - 1)
-                                    val pixW = (cropW  * fw).toInt().coerceIn(1, full.width  - pixX)
-                                    val pixH = (cropH  * fh).toInt().coerceIn(1, full.height - pixY)
+                                    // Map the fraction-based crop box to actual bitmap pixels.
+                                    // boxLeft/boxTop are fractions of the image (not the display),
+                                    // so we multiply directly by the full bitmap dimensions.
+                                    val bx = (boxLeft       * fw).toInt().coerceIn(0, full.width - 1)
+                                    val by = (boxTop        * fh).toInt().coerceIn(0, full.height - 1)
+                                    val bw = (boxW          * fw).toInt().coerceIn(1, full.width  - bx)
+                                    val bh = (boxH          * fh).toInt().coerceIn(1, full.height - by)
 
-                                    // Scale the cropped region to the exact screen pixel dimensions
-                                    // so ContentScale.Crop (or FillBounds) in ScribeTheme is a no-op.
-                                    val cropped = android.graphics.Bitmap.createBitmap(full, pixX, pixY, pixW, pixH)
+                                    // Crop the selected region from the full bitmap
+                                    val cropped = android.graphics.Bitmap.createBitmap(full, bx, by, bw, bh)
                                     full.recycle()
-                                    val scaled = android.graphics.Bitmap.createScaledBitmap(
-                                        cropped,
-                                        screenWidthPx.toInt().coerceAtLeast(1),
-                                        screenHeightPx.toInt().coerceAtLeast(1),
-                                        true
-                                    )
-                                    if (scaled !== cropped) cropped.recycle()
 
+                                    // Scale to exact screen pixels so ContentScale.FillBounds
+                                    // in ScribeTheme renders it with zero distortion and no re-crop.
+                                    val targetW = screenW.toInt().coerceAtLeast(1)
+                                    val targetH = screenH.toInt().coerceAtLeast(1)
+                                    val scaled = android.graphics.Bitmap.createScaledBitmap(
+                                        cropped, targetW, targetH, true
+                                    )
+                                    cropped.recycle()
+
+                                    // Persist alongside the original
                                     val dir = java.io.File(context.filesDir, "bg_images").also { it.mkdirs() }
                                     val dest = java.io.File(dir, "theme_bg_crop_${System.currentTimeMillis()}.jpg")
                                     dest.outputStream().use { out ->
@@ -1554,14 +1472,22 @@ private fun ImageCropScreen(
                                 }
                             }
                             isSaving = false
-                            if (result != null) onConfirm(result) else onConfirm(imageUri)
+                            if (result != null) {
+                                onConfirm(result)
+                            } else {
+                                onConfirm(imageUri) // fallback: use image as-is
+                            }
                         }
                     }
                 },
                 enabled = !isSaving
             ) {
                 if (isSaving) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
                     Spacer(Modifier.width(8.dp))
                     Text("Saving...")
                 } else {
