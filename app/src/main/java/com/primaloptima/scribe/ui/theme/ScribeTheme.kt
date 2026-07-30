@@ -61,6 +61,7 @@ import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.rememberHazeState
 import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.HazeTint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -138,7 +139,7 @@ fun Modifier.frostedBar(hazeState: HazeState?): Modifier {
     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null) {
         this.hazeEffect(
             state = hazeState,
-            style = HazeStyle(blurRadius = blurRadius.dp, tint = tintColor, noiseFactor = 0f)
+            style = HazeStyle(blurRadius = blurRadius.dp, tint = HazeTint(tintColor), noiseFactor = 0f)
         )
     } else if (oneShotBitmap != null) {
         this.drawWithOneShotBitmap(oneShotBitmap, tintColor)
@@ -168,7 +169,7 @@ fun Modifier.frostedFab(hazeState: HazeState?): Modifier {
             .clip(androidx.compose.foundation.shape.CircleShape)
             .hazeEffect(
                 state = hazeState,
-                style = HazeStyle(blurRadius = blurRadius.dp, tint = tintColor, noiseFactor = 0f)
+                style = HazeStyle(blurRadius = blurRadius.dp, tint = HazeTint(tintColor), noiseFactor = 0f)
             )
     } else if (oneShotBitmap != null) {
         this
@@ -207,7 +208,7 @@ fun Modifier.frostedPanel(hazeState: HazeState?): Modifier {
     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null) {
         this.hazeEffect(
             state = hazeState,
-            style = HazeStyle(blurRadius = blurRadius.dp, tint = tintColor, noiseFactor = 0f)
+            style = HazeStyle(blurRadius = blurRadius.dp, tint = HazeTint(tintColor), noiseFactor = 0f)
         )
     } else if (oneShotBitmap != null) {
         this.drawWithOneShotBitmap(oneShotBitmap, tintColor)
@@ -250,7 +251,7 @@ fun Modifier.frostedCard(
             .clip(shape)
             .hazeEffect(
                 state = hazeState,
-                style = HazeStyle(blurRadius = blurRadius.dp, tint = tintColor, noiseFactor = 0f)
+                style = HazeStyle(blurRadius = blurRadius.dp, tint = HazeTint(tintColor), noiseFactor = 0f)
             )
     } else if (oneShotBitmap != null) {
         this
@@ -304,7 +305,7 @@ fun FrostedDialog(
                 val tintColor = if (tintEnabled) solidSurface.copy(alpha = 0.25f) else Color.Transparent
                 Modifier.clip(shape).hazeEffect(
                     state = hazeState,
-                    style = HazeStyle(blurRadius = blurRadius.dp, tint = tintColor, noiseFactor = 0f)
+                    style = HazeStyle(blurRadius = blurRadius.dp, tint = HazeTint(tintColor), noiseFactor = 0f)
                 )
             }
             hasBgImage && oneShotBitmap != null -> {
