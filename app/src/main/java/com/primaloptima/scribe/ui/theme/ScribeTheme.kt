@@ -375,9 +375,12 @@ fun FrostedDialog(
 fun frostedContainerColor(fallback: Color): Color {
     val hazeState = LocalHazeState.current
     val oneShotBitmap = LocalOneShotBitmap.current
+    val barBlurBitmap = LocalBarBlurBitmap.current
     val hasBgImage = localHasBgImage()
-    // Transparent so the frosted modifier (hazeEffect or one-shot bitmap) shows through
-    val legacyReady = Build.VERSION.SDK_INT < Build.VERSION_CODES.S && oneShotBitmap != null
+    // Transparent so the frosted modifier (hazeEffect or one-shot bitmap) shows through.
+    // Check barBlurBitmap too — FABs and bars use it instead of oneShotBitmap on API < 31.
+    val legacyReady = Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&
+            (oneShotBitmap != null || barBlurBitmap != null)
     val modernReady = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null
     return if (hasBgImage && (modernReady || legacyReady)) Color.Transparent else fallback
 }
@@ -387,13 +390,18 @@ fun frostedContainerColor(fallback: Color): Color {
  * then overlays [tint] on top to achieve the frosted glass look.
  * The bitmap is the one-shot blurred screen capture taken just before the
  * panel/dialog opened, so it shows the actual UI content blurred behind it.
+ *
+ * Must be @Composable so [remember] keeps screenOffset/rootSize stable across
+ * recompositions — plain `fun` would recreate them on every recompose, causing
+ * rootSize to always read as Zero and squashing the whole bitmap into the bar.
  */
+@Composable
 fun Modifier.drawWithOneShotBitmap(bitmap: Bitmap, tint: Color): Modifier {
     // Track this composable's position on screen so we can crop the correct
     // slice of the blurred screenshot — making it look like frosted glass
     // over whatever was physically behind this panel, not a scaled copy of the whole image.
-    var screenOffset by mutableStateOf(androidx.compose.ui.unit.IntOffset.Zero)
-    var rootSize by mutableStateOf(androidx.compose.ui.unit.IntSize.Zero)
+    var screenOffset by remember { mutableStateOf(androidx.compose.ui.unit.IntOffset.Zero) }
+    var rootSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     return this
         .onGloballyPositioned { coords ->
             screenOffset = coords.positionInRoot().let {
@@ -407,9 +415,11 @@ fun Modifier.drawWithOneShotBitmap(bitmap: Bitmap, tint: Color): Modifier {
         .drawWithContent {
             val bitmapW = bitmap.width.toFloat()
             val bitmapH = bitmap.height.toFloat()
-            // Use root (screen) dimensions for correct coordinate mapping
-            val screenW = if (rootSize.width > 0) rootSize.width.toFloat() else size.width
-            val screenH = if (rootSize.height > 0) rootSize.height.toFloat() else size.height
+            // Use root (screen) dimensions for correct coordinate mapping.
+            // Fall back to the bitmap's own dimensions on the first frame before
+            // onGloballyPositioned fires — avoids squashing the whole image into the bar.
+            val screenW = if (rootSize.width > 0) rootSize.width.toFloat() else bitmapW
+            val screenH = if (rootSize.height > 0) rootSize.height.toFloat() else bitmapH
 
             // Source rect: the slice of the full blurred bitmap that sits behind this composable
             val srcLeft   = (screenOffset.x.toFloat() / screenW * bitmapW).coerceIn(0f, bitmapW)
