@@ -60,7 +60,7 @@ import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.rememberHazeState
-import dev.chrisbanes.haze.materials.HazeMaterials
+import dev.chrisbanes.haze.HazeStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -79,6 +79,12 @@ val LocalScreenSize = compositionLocalOf { Pair(1080f, 1920f) }
  * When false all frosted modifiers fall back to a solid surface background.
  */
 val LocalFrostedGlass = compositionLocalOf { true }
+
+/** Whether the frosted glass tint overlay is enabled. false = pure blur, no colour wash. */
+val LocalFrostedTint = compositionLocalOf { true }
+
+/** Blur radius (dp) for Haze on API 31+. Pre-API-31: applied at bitmap-load time. */
+val LocalFrostedBlurRadius = compositionLocalOf { 15f }
 
 /**
  * Holds the one-shot blurred screenshot bitmap captured just before a panel/dialog
@@ -124,13 +130,18 @@ fun Modifier.frostedBar(hazeState: HazeState?): Modifier {
     val solidSurface = LocalSolidSurface.current
     val oneShotBitmap = LocalOneShotBitmap.current
     val hasBgImage = localHasBgImage()
+    val tintEnabled = LocalFrostedTint.current
+    val blurRadius = LocalFrostedBlurRadius.current
+    val tintColor = if (tintEnabled) solidSurface.copy(alpha = 0.25f) else Color.Transparent
     return if (!hasBgImage) {
         this.background(solidSurface)
     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null) {
-        this.hazeEffect(state = hazeState, style = HazeMaterials.thin())
+        this.hazeEffect(
+            state = hazeState,
+            style = HazeStyle(blurRadius = blurRadius.dp, tint = tintColor, noiseFactor = 0f)
+        )
     } else if (oneShotBitmap != null) {
-        // Pre-API-31: draw the one-shot blurred capture as the bar background
-        this.drawWithOneShotBitmap(oneShotBitmap, solidSurface.copy(alpha = 0.3f))
+        this.drawWithOneShotBitmap(oneShotBitmap, tintColor)
     } else {
         this.background(solidSurface.copy(alpha = 0.82f))
     }
@@ -147,16 +158,22 @@ fun Modifier.frostedFab(hazeState: HazeState?): Modifier {
     val solidSurface = LocalSolidSurface.current
     val oneShotBitmap = LocalOneShotBitmap.current
     val hasBgImage = localHasBgImage()
+    val tintEnabled = LocalFrostedTint.current
+    val blurRadius = LocalFrostedBlurRadius.current
+    val tintColor = if (tintEnabled) solidSurface.copy(alpha = 0.25f) else Color.Transparent
     return if (!hasBgImage) {
         this
     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null) {
         this
             .clip(androidx.compose.foundation.shape.CircleShape)
-            .hazeEffect(state = hazeState, style = HazeMaterials.regular())
+            .hazeEffect(
+                state = hazeState,
+                style = HazeStyle(blurRadius = blurRadius.dp, tint = tintColor, noiseFactor = 0f)
+            )
     } else if (oneShotBitmap != null) {
         this
             .clip(androidx.compose.foundation.shape.CircleShape)
-            .drawWithOneShotBitmap(oneShotBitmap, solidSurface.copy(alpha = 0.3f))
+            .drawWithOneShotBitmap(oneShotBitmap, tintColor)
     } else {
         this.background(solidSurface.copy(alpha = 0.75f), shape = androidx.compose.foundation.shape.CircleShape)
     }
@@ -182,12 +199,18 @@ fun Modifier.frostedPanel(hazeState: HazeState?): Modifier {
     val solidSurface = LocalSolidSurface.current
     val oneShotBitmap = LocalOneShotBitmap.current
     val hasBgImage = localHasBgImage()
+    val tintEnabled = LocalFrostedTint.current
+    val blurRadius = LocalFrostedBlurRadius.current
+    val tintColor = if (tintEnabled) solidSurface.copy(alpha = 0.25f) else Color.Transparent
     return if (!hasBgImage) {
         this.background(solidSurface)
     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null) {
-        this.hazeEffect(state = hazeState, style = HazeMaterials.regular())
+        this.hazeEffect(
+            state = hazeState,
+            style = HazeStyle(blurRadius = blurRadius.dp, tint = tintColor, noiseFactor = 0f)
+        )
     } else if (oneShotBitmap != null) {
-        this.drawWithOneShotBitmap(oneShotBitmap, solidSurface.copy(alpha = 0.25f))
+        this.drawWithOneShotBitmap(oneShotBitmap, tintColor)
     } else {
         this.background(solidSurface.copy(alpha = 0.95f))
     }
@@ -212,23 +235,27 @@ fun Modifier.frostedCard(
     hazeState: HazeState?,
     shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(16.dp),
     solidAlpha: Float = 0.92f,
-    /** When true, applies clip+solid background even when no bg image is active.
-     *  Use for plain Box/Container callers that don't have their own background. */
     applyFallbackBackground: Boolean = false
 ): Modifier {
     val solidSurface = LocalSolidSurface.current
     val hasBgImage = localHasBgImage()
     val oneShotBitmap = LocalOneShotBitmap.current
+    val tintEnabled = LocalFrostedTint.current
+    val blurRadius = LocalFrostedBlurRadius.current
+    val tintColor = if (tintEnabled) solidSurface.copy(alpha = 0.25f) else Color.Transparent
     return if (!hasBgImage || hazeState == null) {
         this
     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         this
             .clip(shape)
-            .hazeEffect(state = hazeState, style = HazeMaterials.regular())
+            .hazeEffect(
+                state = hazeState,
+                style = HazeStyle(blurRadius = blurRadius.dp, tint = tintColor, noiseFactor = 0f)
+            )
     } else if (oneShotBitmap != null) {
         this
             .clip(shape)
-            .drawWithOneShotBitmap(oneShotBitmap, solidSurface.copy(alpha = 0.25f))
+            .drawWithOneShotBitmap(oneShotBitmap, tintColor)
     } else {
         this
             .clip(shape)
@@ -271,10 +298,20 @@ fun FrostedDialog(
         contentAlignment = Alignment.Center
     ) {
         val containerModifier = when {
-            hasBgImage && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null ->
-                Modifier.clip(shape).hazeEffect(state = hazeState, style = HazeMaterials.regular())
-            hasBgImage && oneShotBitmap != null ->
-                Modifier.clip(shape).drawWithOneShotBitmap(oneShotBitmap, solidSurface.copy(alpha = 0.25f))
+            hasBgImage && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null -> {
+                val tintEnabled = LocalFrostedTint.current
+                val blurRadius = LocalFrostedBlurRadius.current
+                val tintColor = if (tintEnabled) solidSurface.copy(alpha = 0.25f) else Color.Transparent
+                Modifier.clip(shape).hazeEffect(
+                    state = hazeState,
+                    style = HazeStyle(blurRadius = blurRadius.dp, tint = tintColor, noiseFactor = 0f)
+                )
+            }
+            hasBgImage && oneShotBitmap != null -> {
+                val tintEnabled = LocalFrostedTint.current
+                val tintColor = if (tintEnabled) solidSurface.copy(alpha = 0.25f) else Color.Transparent
+                Modifier.clip(shape).drawWithOneShotBitmap(oneShotBitmap, tintColor)
+            }
             else ->
                 Modifier.background(solidSurface, shape = shape)
         }
@@ -619,6 +656,8 @@ fun ScribeComposeTheme(
     val bgOpacity = resolvedTheme.backgroundImageOpacity ?: 0.35f
     val bgMode = resolvedTheme.bgMode
     val blurIntensity = resolvedTheme.blurIntensity
+    val frostedTintEnabled = resolvedTheme.frostedTintEnabled
+    val frostedBlurRadius = resolvedTheme.frostedBlurRadius
 
     // On API < 31 we can't use RenderEffect on a live composable, so we
     // pre-blur the source bitmap once using pure Kotlin stack blur and
@@ -728,7 +767,7 @@ fun ScribeComposeTheme(
 
                 // image mode: blur the sharp image now
                 bgMode == "image" && softwareImageModel != null ->
-                    com.primaloptima.scribe.util.BitmapBlur.blurBitmap(softwareImageModel!!, radius = 18)
+                    com.primaloptima.scribe.util.BitmapBlur.blurBitmap(softwareImageModel!!, radius = frostedBlurRadius.toInt().coerceIn(1, 25))
 
                 // fallback: load fresh at screen aspect ratio (rare cold-start race)
                 hasBgImage && bgUri != null -> {
@@ -742,7 +781,7 @@ fun ScribeComposeTheme(
                         val bmp = (loader.execute(req) as? coil3.request.SuccessResult)
                             ?.image
                             ?.let { (it as? coil3.BitmapImage)?.bitmap }
-                        bmp?.let { com.primaloptima.scribe.util.BitmapBlur.blurBitmap(it, radius = 18) }
+                        bmp?.let { com.primaloptima.scribe.util.BitmapBlur.blurBitmap(it, radius = frostedBlurRadius.toInt().coerceIn(1, 25)) }
                     } catch (_: Exception) { null }
                 }
 
@@ -760,6 +799,8 @@ fun ScribeComposeTheme(
                 LocalBgAnalysisBitmap provides analysisBitmap,
                 LocalScreenSize provides Pair(screenWidthPx, screenHeightPx),
                 LocalFrostedGlass provides resolvedTheme.frostedGlassEnabled,
+                LocalFrostedTint provides frostedTintEnabled,
+                LocalFrostedBlurRadius provides frostedBlurRadius,
                 LocalSolidSurface provides animSurface,
                 LocalBarBlurBitmap provides barBlurBitmap,
                 // One-shot bitmap starts null; screens set it via their own
