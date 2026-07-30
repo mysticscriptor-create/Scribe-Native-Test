@@ -129,11 +129,11 @@ fun localHasBgImage(): Boolean {
 @Composable
 fun Modifier.frostedBar(hazeState: HazeState?): Modifier {
     val solidSurface = LocalSolidSurface.current
-    val oneShotBitmap = LocalOneShotBitmap.current
+    val barBlurBitmap = LocalBarBlurBitmap.current   // pre-blurred wallpaper, for bars/FABs
     val hasBgImage = localHasBgImage()
     val tintEnabled = LocalFrostedTint.current
     val blurRadius = LocalFrostedBlurRadius.current
-    val tintColor = if (tintEnabled) solidSurface.copy(alpha = 0.25f) else Color.Transparent
+    val tintColor = if (tintEnabled) solidSurface.copy(alpha = 0.35f) else Color.Transparent
     return if (!hasBgImage) {
         this.background(solidSurface)
     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null) {
@@ -141,10 +141,12 @@ fun Modifier.frostedBar(hazeState: HazeState?): Modifier {
             state = hazeState,
             style = HazeStyle(blurRadius = blurRadius.dp, tint = HazeTint(tintColor), noiseFactor = 0f)
         )
-    } else if (oneShotBitmap != null) {
-        this.drawWithOneShotBitmap(oneShotBitmap, tintColor)
+    } else if (barBlurBitmap != null) {
+        // Use the pre-blurred wallpaper bitmap — already has applyFrostedGlassLook applied
+        this.drawWithOneShotBitmap(barBlurBitmap, tintColor)
     } else {
-        this.background(solidSurface.copy(alpha = 0.82f))
+        // No bitmap yet (still loading) — opaque fallback so wallpaper never bleeds through
+        this.background(solidSurface)
     }
 }
 
@@ -157,11 +159,11 @@ fun Modifier.frostedBar(hazeState: HazeState?): Modifier {
 @Composable
 fun Modifier.frostedFab(hazeState: HazeState?): Modifier {
     val solidSurface = LocalSolidSurface.current
-    val oneShotBitmap = LocalOneShotBitmap.current
+    val barBlurBitmap = LocalBarBlurBitmap.current   // pre-blurred wallpaper, for bars/FABs
     val hasBgImage = localHasBgImage()
     val tintEnabled = LocalFrostedTint.current
     val blurRadius = LocalFrostedBlurRadius.current
-    val tintColor = if (tintEnabled) solidSurface.copy(alpha = 0.25f) else Color.Transparent
+    val tintColor = if (tintEnabled) solidSurface.copy(alpha = 0.35f) else Color.Transparent
     return if (!hasBgImage) {
         this
     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null) {
@@ -171,12 +173,14 @@ fun Modifier.frostedFab(hazeState: HazeState?): Modifier {
                 state = hazeState,
                 style = HazeStyle(blurRadius = blurRadius.dp, tint = HazeTint(tintColor), noiseFactor = 0f)
             )
-    } else if (oneShotBitmap != null) {
+    } else if (barBlurBitmap != null) {
+        // Use the pre-blurred wallpaper bitmap — already has applyFrostedGlassLook applied
         this
             .clip(androidx.compose.foundation.shape.CircleShape)
-            .drawWithOneShotBitmap(oneShotBitmap, tintColor)
+            .drawWithOneShotBitmap(barBlurBitmap, tintColor)
     } else {
-        this.background(solidSurface.copy(alpha = 0.75f), shape = androidx.compose.foundation.shape.CircleShape)
+        // No bitmap yet — opaque fallback so wallpaper never bleeds through
+        this.background(solidSurface, shape = androidx.compose.foundation.shape.CircleShape)
     }
 }
 
