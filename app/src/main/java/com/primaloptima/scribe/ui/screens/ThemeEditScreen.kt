@@ -125,7 +125,7 @@ fun ThemeEditScreen(
                 dialogCaptured = true
                 val raw = BitmapBlur.captureOnly(view)
                 dialogOneShotBitmap = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15).let { b -> BitmapBlur.applyFrostedGlassLook(b) } }
                 }
             } else if (!anyDialogOpen) {
                 dialogCaptured = false
