@@ -612,6 +612,136 @@ fun ScribeComposeTheme(
 
     val hazeState = rememberHazeState(blurEnabled = true)
 
+    // ── Pre-compute blur inputs before CompositionLocalProvider ──────────────
+    // These vals must live here (not inside the provider's content lambda) because
+    // barBlurBitmap is referenced in the provider list itself.
+
+    val bgOpacity = resolvedTheme.backgroundImageOpacity ?: 0.35f
+    val bgMode = resolvedTheme.bgMode
+    val blurIntensity = resolvedTheme.blurIntensity
+
+    // On API < 31 we can't use RenderEffect on a live composable, so we
+    // pre-blur the source bitmap once using pure Kotlin stack blur and
+    // display that pre-blurred bitmap instead.
+    //
+    // Even for bgMode == "image" (no blur), we must load with
+    // allowHardware(false) on API < 31 so that BitmapBlur.captureOnly
+    // can draw the view onto a software Canvas without crashing.
+    // Hardware bitmaps throw an exception when drawn onto a software Canvas,
+    // which captureOnly silently catches → returns null → frosted glass falls
+    // back to solid. By keeping the background image as a software bitmap
+    // the capture succeeds and one-shot blur works correctly.
+    val needsSoftwareBlur = bgMode == "blurred" &&
+            blurIntensity > 0f &&
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&
+            bgUri != null
+
+    // For bgMode == "image" on API < 31 we still need a software bitmap
+    // (no blur) so captureOnly can read the view hierarchy.
+    val needsSoftwareImage = bgMode == "image" &&
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&
+            bgUri != null
+
+    val softwareBlurredModel by produceState<android.graphics.Bitmap?>(
+        initialValue = null,
+        key1 = bgUri,
+        key2 = blurIntensity,
+        key3 = needsSoftwareBlur
+    ) {
+        if (!needsSoftwareBlur || bgUri == null) {
+            value = null
+            return@produceState
+        }
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val loader = coil3.ImageLoader(context)
+                val req = coil3.request.ImageRequest.Builder(context)
+                    .data(bgUri)
+                    .size(coil3.size.Size(800, 800))
+                    .allowHardware(false)
+                    .build()
+                val result = loader.execute(req)
+                val bmp = (result as? coil3.request.SuccessResult)
+                    ?.image
+                    ?.let { (it as? coil3.BitmapImage)?.bitmap }
+                bmp?.let {
+                    val radiusPx = (blurIntensity * 0.8f).toInt().coerceIn(1, 25)
+                    com.primaloptima.scribe.util.BitmapBlur.blurBitmap(it, radiusPx)
+                }
+            } catch (_: Exception) { null }
+        }
+    }
+
+    // Software (non-blurred) image for bgMode == "image" on API < 31
+    val softwareImageModel by produceState<android.graphics.Bitmap?>(
+        initialValue = null,
+        key1 = bgUri,
+        key2 = needsSoftwareImage
+    ) {
+        if (!needsSoftwareImage || bgUri == null) {
+            value = null
+            return@produceState
+        }
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val loader = coil3.ImageLoader(context)
+                val req = coil3.request.ImageRequest.Builder(context)
+                    .data(bgUri)
+                    .size(coil3.size.Size(1080, 1920))
+                    .allowHardware(false)
+                    .build()
+                val result = loader.execute(req)
+                (result as? coil3.request.SuccessResult)
+                    ?.image
+                    ?.let { (it as? coil3.BitmapImage)?.bitmap }
+            } catch (_: Exception) { null }
+        }
+    }
+
+    // ── Bar blur bitmap (API < 31 only) ──────────────────────────────────────
+    // Derived from bitmaps that Coil already loaded above — no extra request.
+    // Provided as LocalBarBlurBitmap for bars and FABs only.
+    // Dialogs and drawers are unaffected (they use LocalOneShotBitmap).
+    val barBlurBitmap by produceState<Bitmap?>(
+        initialValue = null,
+        keys = arrayOf(bgUri, bgMode, softwareBlurredModel, softwareImageModel)
+    ) {
+        value = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S || !hasBgImage) {
+            return@produceState  // Haze handles it natively on API 31+
+        }
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            when {
+                // blurred mode: softwareBlurredModel is already blurred
+                bgMode == "blurred" && softwareBlurredModel != null ->
+                    softwareBlurredModel
+
+                // image mode: softwareImageModel is sharp — blur it now
+                bgMode == "image" && softwareImageModel != null ->
+                    com.primaloptima.scribe.util.BitmapBlur.blurBitmap(softwareImageModel!!, radius = 18)
+
+                // fallback: load fresh if produceState fires before
+                // softwareImageModel is ready (rare, first cold start)
+                hasBgImage && bgUri != null -> {
+                    try {
+                        val loader = coil3.ImageLoader(context)
+                        val req = coil3.request.ImageRequest.Builder(context)
+                            .data(bgUri)
+                            .size(coil3.size.Size(800, 1422))
+                            .allowHardware(false)
+                            .build()
+                        val bmp = (loader.execute(req) as? coil3.request.SuccessResult)
+                            ?.image
+                            ?.let { (it as? coil3.BitmapImage)?.bitmap }
+                        bmp?.let { com.primaloptima.scribe.util.BitmapBlur.blurBitmap(it, radius = 18) }
+                    } catch (_: Exception) { null }
+                }
+
+                else -> null
+            }
+        }
+    }
+
     MaterialTheme(
         colorScheme = animatedColorScheme,
         content = {
@@ -627,135 +757,6 @@ fun ScribeComposeTheme(
                 // CompositionLocalProvider wrapping the drawer/dialog content.
                 LocalOneShotBitmap provides null
             ) {
-                val bgOpacity = resolvedTheme.backgroundImageOpacity ?: 0.35f
-                val bgMode = resolvedTheme.bgMode
-                val blurIntensity = resolvedTheme.blurIntensity
-
-                // On API < 31 we can't use RenderEffect on a live composable, so we
-                // pre-blur the source bitmap once using pure Kotlin stack blur and
-                // display that pre-blurred bitmap instead.
-                //
-                // Even for bgMode == "image" (no blur), we must load with
-                // allowHardware(false) on API < 31 so that BitmapBlur.captureOnly
-                // can draw the view onto a software Canvas without crashing.
-                // Hardware bitmaps throw an exception when drawn onto a software Canvas,
-                // which captureOnly silently catches → returns null → frosted glass falls
-                // back to solid. By keeping the background image as a software bitmap
-                // the capture succeeds and one-shot blur works correctly.
-                val needsSoftwareBlur = bgMode == "blurred" &&
-                        blurIntensity > 0f &&
-                        Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&
-                        bgUri != null
-
-                // For bgMode == "image" on API < 31 we still need a software bitmap
-                // (no blur) so captureOnly can read the view hierarchy.
-                val needsSoftwareImage = bgMode == "image" &&
-                        Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&
-                        bgUri != null
-
-                val softwareBlurredModel by produceState<android.graphics.Bitmap?>(
-                    initialValue = null,
-                    key1 = bgUri,
-                    key2 = blurIntensity,
-                    key3 = needsSoftwareBlur
-                ) {
-                    if (!needsSoftwareBlur || bgUri == null) {
-                        value = null
-                        return@produceState
-                    }
-                    value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        try {
-                            val loader = coil3.ImageLoader(context)
-                            val req = coil3.request.ImageRequest.Builder(context)
-                                .data(bgUri)
-                                .size(coil3.size.Size(800, 800))
-                                .allowHardware(false)
-                                .build()
-                            val result = loader.execute(req)
-                            val bmp = (result as? coil3.request.SuccessResult)
-                                ?.image
-                                ?.let { (it as? coil3.BitmapImage)?.bitmap }
-                            bmp?.let {
-                                val radiusPx = (blurIntensity * 0.8f).toInt().coerceIn(1, 25)
-                                com.primaloptima.scribe.util.BitmapBlur.blurBitmap(it, radiusPx)
-                            }
-                        } catch (_: Exception) { null }
-                    }
-                }
-
-                // Software (non-blurred) image for bgMode == "image" on API < 31
-                val softwareImageModel by produceState<android.graphics.Bitmap?>(
-                    initialValue = null,
-                    key1 = bgUri,
-                    key2 = needsSoftwareImage
-                ) {
-                    if (!needsSoftwareImage || bgUri == null) {
-                        value = null
-                        return@produceState
-                    }
-                    value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        try {
-                            val loader = coil3.ImageLoader(context)
-                            val req = coil3.request.ImageRequest.Builder(context)
-                                .data(bgUri)
-                                .size(coil3.size.Size(1080, 1920))
-                                .allowHardware(false)
-                                .build()
-                            val result = loader.execute(req)
-                            (result as? coil3.request.SuccessResult)
-                                ?.image
-                                ?.let { (it as? coil3.BitmapImage)?.bitmap }
-                        } catch (_: Exception) { null }
-                    }
-                }
-
-                // ── Bar blur bitmap (API < 31 only) ──────────────────────────────
-                // Derived from bitmaps that Coil already loaded above — no extra
-                // request. Provided as LocalBarBlurBitmap for bars and FABs only.
-                // Dialogs and drawers are unaffected (they use LocalOneShotBitmap).
-                val barBlurBitmap by produceState<Bitmap?>(
-                    initialValue = null,
-                    key1 = bgUri,
-                    key2 = bgMode,
-                    key3 = softwareBlurredModel,   // ready when blurred mode loads
-                    key4 = softwareImageModel       // ready when image mode loads
-                ) {
-                    value = null
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S || !hasBgImage) {
-                        return@produceState  // Haze handles it natively on API 31+
-                    }
-                    value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        when {
-                            // blurred mode: softwareBlurredModel is already blurred
-                            bgMode == "blurred" && softwareBlurredModel != null ->
-                                softwareBlurredModel
-
-                            // image mode: softwareImageModel is sharp — blur it now
-                            bgMode == "image" && softwareImageModel != null ->
-                                BitmapBlur.blurBitmap(softwareImageModel!!, radius = 18)
-
-                            // fallback: load fresh if produceState fires before
-                            // softwareImageModel is ready (rare, first cold start)
-                            hasBgImage && bgUri != null -> {
-                                try {
-                                    val loader = coil3.ImageLoader(context)
-                                    val req = coil3.request.ImageRequest.Builder(context)
-                                        .data(bgUri)
-                                        .size(coil3.size.Size(800, 1422))
-                                        .allowHardware(false)
-                                        .build()
-                                    val bmp = (loader.execute(req) as? coil3.request.SuccessResult)
-                                        ?.image
-                                        ?.let { (it as? coil3.BitmapImage)?.bitmap }
-                                    bmp?.let { BitmapBlur.blurBitmap(it, radius = 18) }
-                                } catch (_: Exception) { null }
-                            }
-
-                            else -> null
-                        }
-                    }
-                }
-
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
