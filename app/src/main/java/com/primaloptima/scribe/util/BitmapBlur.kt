@@ -84,9 +84,9 @@ object BitmapBlur {
             for (i in pixels.indices) {
                 val p = pixels[i]
                 val a = (p shr 24) and 0xFF
-                val r = ((p shr 16) and 0xFF + lift).coerceAtMost(255)
-                val g = ((p shr 8) and 0xFF + lift).coerceAtMost(255)
-                val b = (p and 0xFF + lift).coerceAtMost(255)
+                val r = ((p shr 16 and 0xFF) + lift).coerceAtMost(255)
+                val g = ((p shr 8  and 0xFF) + lift).coerceAtMost(255)
+                val b = ((p        and 0xFF) + lift).coerceAtMost(255)
                 pixels[i] = (a shl 24) or (r shl 16) or (g shl 8) or b
             }
         }
@@ -104,9 +104,9 @@ object BitmapBlur {
 
                 val p = pixels[i]
                 val a = (p shr 24) and 0xFF
-                val r = ((p shr 16) and 0xFF + offset).coerceIn(0, 255)
-                val g = ((p shr 8) and 0xFF + offset).coerceIn(0, 255)
-                val b = (p and 0xFF + offset).coerceIn(0, 255)
+                val r = ((p shr 16 and 0xFF) + offset).coerceIn(0, 255)
+                val g = ((p shr 8  and 0xFF) + offset).coerceIn(0, 255)
+                val b = ((p        and 0xFF) + offset).coerceIn(0, 255)
                 pixels[i] = (a shl 24) or (r shl 16) or (g shl 8) or b
             }
         }
