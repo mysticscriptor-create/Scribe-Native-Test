@@ -642,6 +642,17 @@ fun ScribeComposeTheme(
             Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&
             bgUri != null
 
+    // ── Aspect-ratio-aware bitmap sizes ──────────────────────────────────────
+    // The background AsyncImage uses ContentScale.Crop — Coil fills the screen
+    // by cropping the image to the screen's exact aspect ratio. If we load the
+    // blur bitmap at a different aspect ratio (e.g. 800×800 square), Coil's
+    // internal downscaling produces a different crop region, making the blur
+    // and the visible background look out of sync.
+    // Fix: load all blur bitmaps at the actual screen aspect ratio so they
+    // receive the same crop that AsyncImage does.
+    val blurLoadW = (screenWidthPx * 0.5f).toInt().coerceAtLeast(1)
+    val blurLoadH = (screenHeightPx * 0.5f).toInt().coerceAtLeast(1)
+
     val softwareBlurredModel by produceState<android.graphics.Bitmap?>(
         initialValue = null,
         key1 = bgUri,
@@ -657,7 +668,7 @@ fun ScribeComposeTheme(
                 val loader = coil3.ImageLoader(context)
                 val req = coil3.request.ImageRequest.Builder(context)
                     .data(bgUri)
-                    .size(coil3.size.Size(800, 800))
+                    .size(coil3.size.Size(blurLoadW, blurLoadH))
                     .allowHardware(false)
                     .build()
                 val result = loader.execute(req)
@@ -672,7 +683,8 @@ fun ScribeComposeTheme(
         }
     }
 
-    // Software (non-blurred) image for bgMode == "image" on API < 31
+    // Software (non-blurred) image for bgMode == "image" on API < 31.
+    // Load at full screen resolution so captureOnly has accurate pixel data.
     val softwareImageModel by produceState<android.graphics.Bitmap?>(
         initialValue = null,
         key1 = bgUri,
@@ -687,7 +699,7 @@ fun ScribeComposeTheme(
                 val loader = coil3.ImageLoader(context)
                 val req = coil3.request.ImageRequest.Builder(context)
                     .data(bgUri)
-                    .size(coil3.size.Size(1080, 1920))
+                    .size(coil3.size.Size(screenWidthPx.toInt(), screenHeightPx.toInt()))
                     .allowHardware(false)
                     .build()
                 val result = loader.execute(req)
@@ -699,7 +711,7 @@ fun ScribeComposeTheme(
     }
 
     // ── Bar blur bitmap (API < 31 only) ──────────────────────────────────────
-    // Derived from bitmaps that Coil already loaded above — no extra request.
+    // Derived from bitmaps Coil already loaded above — no extra request.
     // Provided as LocalBarBlurBitmap for bars and FABs only.
     // Dialogs and drawers are unaffected (they use LocalOneShotBitmap).
     val barBlurBitmap by produceState<Bitmap?>(
@@ -716,18 +728,17 @@ fun ScribeComposeTheme(
                 bgMode == "blurred" && softwareBlurredModel != null ->
                     softwareBlurredModel
 
-                // image mode: softwareImageModel is sharp — blur it now
+                // image mode: blur the sharp image now
                 bgMode == "image" && softwareImageModel != null ->
                     com.primaloptima.scribe.util.BitmapBlur.blurBitmap(softwareImageModel!!, radius = 18)
 
-                // fallback: load fresh if produceState fires before
-                // softwareImageModel is ready (rare, first cold start)
+                // fallback: load fresh at screen aspect ratio (rare cold-start race)
                 hasBgImage && bgUri != null -> {
                     try {
                         val loader = coil3.ImageLoader(context)
                         val req = coil3.request.ImageRequest.Builder(context)
                             .data(bgUri)
-                            .size(coil3.size.Size(800, 1422))
+                            .size(coil3.size.Size(blurLoadW, blurLoadH))
                             .allowHardware(false)
                             .build()
                         val bmp = (loader.execute(req) as? coil3.request.SuccessResult)
