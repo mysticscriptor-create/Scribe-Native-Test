@@ -41,6 +41,7 @@ import android.graphics.Bitmap
 import android.os.Build
 import com.primaloptima.scribe.ui.theme.LocalHazeState
 import com.primaloptima.scribe.ui.theme.LocalOneShotBitmap
+import com.primaloptima.scribe.ui.theme.LocalBarBlurBitmap
 import com.primaloptima.scribe.ui.theme.LocalSolidSurface
 import com.primaloptima.scribe.ui.theme.frostedBar
 import com.primaloptima.scribe.ui.theme.frostedContainerColor
@@ -93,32 +94,6 @@ fun HomeScreen(
     val view = LocalView.current
     var oneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var captured by remember { mutableStateOf(false) }
-
-    // Persistent blur bitmap for top/bottom bars on Android 10.
-    // Bars are always visible so we can't capture "just before" they appear.
-    // Instead we capture once after the background image has had time to render
-    // (a short delay lets AsyncImage finish its first draw), then reuse it.
-    // Keyed on bgUri + bgMode so it refreshes whenever the theme changes.
-    val appTheme = LocalAppTheme.current
-    val bgUri = appTheme?.backgroundImageUri
-    val bgMode = appTheme?.bgMode ?: "color"
-    // Must match the same condition ScribeTheme's localHasBgImage() uses,
-    // otherwise the capture fires when frostedBar won't use it (bgMode=="color")
-    // or doesn't fire when it should (bgMode=="image"/"blurred" with a uri).
-    val hasBgImage = !bgUri.isNullOrEmpty() && (bgMode == "image" || bgMode == "blurred")
-    var barBlurBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-        LaunchedEffect(bgUri, bgMode) {
-            barBlurBitmap = null          // clear stale bitmap on theme/bg change
-            if (hasBgImage) {
-                kotlinx.coroutines.delay(400) // wait for AsyncImage to finish first draw
-                val raw = BitmapBlur.captureOnly(view)
-                barBlurBitmap = withContext(Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
-                }
-            }
-        }
-    }
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
         LaunchedEffect(drawerState.currentValue, drawerState.targetValue) {
             if (drawerState.targetValue == DrawerValue.Open && !captured) {
@@ -350,8 +325,9 @@ fun HomeScreen(
             modifier = Modifier.then(swipeGestureModifier),
             topBar = {
                 // On API < 31 frostedBar needs LocalOneShotBitmap to be non-null.
-                // Provide the persistent barBlurBitmap captured at screen-load time.
-                CompositionLocalProvider(LocalOneShotBitmap provides barBlurBitmap) {
+                // LocalBarBlurBitmap is provided by ScribeTheme from the Coil bitmap —
+                // no screen capture needed; already available when the image is loaded.
+                CompositionLocalProvider(LocalOneShotBitmap provides LocalBarBlurBitmap.current) {
                 TopAppBar(
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = Color.Transparent
@@ -472,10 +448,10 @@ fun HomeScreen(
                         }
                     }
                 )
-                } // end CompositionLocalProvider(barBlurBitmap for topBar)
+                } // end CompositionLocalProvider(LocalBarBlurBitmap for topBar)
             },
             bottomBar = {
-                CompositionLocalProvider(LocalOneShotBitmap provides barBlurBitmap) {
+                CompositionLocalProvider(LocalOneShotBitmap provides LocalBarBlurBitmap.current) {
                 NavigationBar(
                     containerColor = Color.Transparent,
                     tonalElevation = 0.dp,
@@ -525,12 +501,12 @@ fun HomeScreen(
                         colors = navColors
                     )
                 }
-                } // end CompositionLocalProvider(barBlurBitmap for bottomBar)
+                } // end CompositionLocalProvider(LocalBarBlurBitmap for bottomBar)
             },
             floatingActionButton = {
-                // FAB is always visible — use the persistent bar bitmap (not the
-                // dialog bitmap, which is only set while a dialog is open).
-                CompositionLocalProvider(LocalOneShotBitmap provides barBlurBitmap) {
+                // FAB is always visible — LocalBarBlurBitmap (derived from the Coil
+                // image in ScribeTheme) is already loaded, no screen capture needed.
+                CompositionLocalProvider(LocalOneShotBitmap provides LocalBarBlurBitmap.current) {
                 val fabTheme = LocalAppTheme.current
                 val accentClr = fabTheme?.let {
                     parseComposeColor(it.colors.accent, MaterialTheme.colorScheme.primary)
@@ -574,7 +550,7 @@ fun HomeScreen(
                         else -> Box(Modifier)
                     }
                 }
-                } // end CompositionLocalProvider(barBlurBitmap for FAB)
+                } // end CompositionLocalProvider(LocalBarBlurBitmap for FAB)
             }
         ) { padding ->
             Box(
