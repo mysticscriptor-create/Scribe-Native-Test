@@ -66,6 +66,9 @@ import com.primaloptima.scribe.util.SAFHelper
 import com.primaloptima.scribe.util.model.AppTheme
 import com.primaloptima.scribe.viewmodel.ThemeViewModel
 import java.io.File
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -104,6 +107,9 @@ fun ThemeEditScreen(
 
     var activeColorPickerTarget by remember { mutableStateOf<ColorPickerTarget?>(null) }
     var showEmojiDialog by remember { mutableStateOf(false) }
+    // Crop screen: shown after the user picks a new background image
+    var showCropScreen by remember { mutableStateOf(false) }
+    var pendingCropUri by remember { mutableStateOf<String?>(null) }
 
     val view = LocalView.current
     val hazeState = LocalHazeState.current
@@ -127,16 +133,19 @@ fun ThemeEditScreen(
 
     val scope = rememberCoroutineScope()
 
-    // Fix: copy image to internal app storage so it survives process death.
-    // SAF content:// URIs lose permission on force-stop; file:// paths in filesDir do not.
+    // Image picker: copies to internal storage, then opens the crop screen so
+    // the user can choose which region of the image to display as background.
     val bgImagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
             scope.launch {
+                // Copy to internal storage first so the crop screen has a stable
+                // file:// URI it can read (SAF content:// may lose permission).
                 val localUri = SAFHelper.copyBgImageToInternalStorage(context, uri)
-                bgUri = (localUri ?: uri).toString()
-                if (bgMode == "color") bgMode = "image"
+                val stableUri = (localUri ?: uri).toString()
+                pendingCropUri = stableUri
+                showCropScreen = true
             }
         }
     }
@@ -251,11 +260,26 @@ fun ThemeEditScreen(
                                 Text(if (bgUri.isNullOrEmpty()) "Pick Image" else "Change Image")
                             }
                             if (!bgUri.isNullOrEmpty()) {
-                                TextButton(onClick = {
-                                    bgUri = null
-                                    bgMode = "color"
-                                }) {
-                                    Text("Remove", color = MaterialTheme.colorScheme.error)
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    // Re-open crop screen for the current image
+                                    TextButton(onClick = {
+                                        pendingCropUri = bgUri
+                                        showCropScreen = true
+                                    }) {
+                                        Icon(
+                                            Icons.Default.Crop,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Crop")
+                                    }
+                                    TextButton(onClick = {
+                                        bgUri = null
+                                        bgMode = "color"
+                                    }) {
+                                        Text("Remove", color = MaterialTheme.colorScheme.error)
+                                    }
                                 }
                             }
                         }
@@ -717,6 +741,25 @@ fun ThemeEditScreen(
         )
         }
     }
+
+    // ── Crop Screen Overlay ───────────────────────────────────────────────────
+    // Shown full-screen after the user picks a new background image.
+    // Lets them drag a crop window to choose which part of the image to display.
+    if (showCropScreen && pendingCropUri != null) {
+        ImageCropScreen(
+            imageUri = pendingCropUri!!,
+            onConfirm = { croppedUri ->
+                bgUri = croppedUri
+                if (bgMode == "color") bgMode = "image"
+                showCropScreen = false
+                pendingCropUri = null
+            },
+            onCancel = {
+                showCropScreen = false
+                pendingCropUri = null
+            }
+        )
+    }
 }
 
 @Composable
@@ -1118,4 +1161,336 @@ private fun exportThemeJson(context: Context, theme: AppTheme) {
     } catch (e: Exception) {
         Toast.makeText(context, "Export failed: ${e.message}", Toast.LENGTH_SHORT).show()
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Image Crop Screen
+//
+// Full-screen overlay that lets the user drag a crop window over their chosen
+// background image. On confirm, the selected region is cropped from the file
+// on disk and saved as a new file — the returned URI replaces bgUri in the
+// theme editor.
+//
+// No external library required — uses pure Compose touch gestures.
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+private fun ImageCropScreen(
+    imageUri: String,
+    onConfirm: (croppedUri: String) -> Unit,
+    onCancel: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    // Crop rect stored as fractions (0..1) of the displayed image size.
+    // Starts at a centered 80% box.
+    var cropLeft   by remember { androidx.compose.runtime.mutableFloatStateOf(0.1f) }
+    var cropTop    by remember { androidx.compose.runtime.mutableFloatStateOf(0.1f) }
+    var cropRight  by remember { androidx.compose.runtime.mutableFloatStateOf(0.9f) }
+    var cropBottom by remember { androidx.compose.runtime.mutableFloatStateOf(0.9f) }
+
+    // Track which handle is being dragged: "move", "tl", "tr", "bl", "br", or null
+    var dragging by remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    var dragStartLeft  by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    var dragStartTop   by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    var dragStartRight by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    var dragStartBottom by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+
+    var isSaving by remember { androidx.compose.runtime.mutableStateOf(false) }
+
+    val minCrop = 0.15f  // minimum crop dimension as fraction of image
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        // Full-screen image preview
+        var imageLayoutSize by remember {
+            androidx.compose.runtime.mutableStateOf(androidx.compose.ui.unit.IntSize.Zero)
+        }
+
+        AsyncImage(
+            model = imageUri,
+            contentDescription = null,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .fillMaxSize()
+                .onGloballyPositioned { coords ->
+                    imageLayoutSize = coords.size
+                }
+        )
+
+        // Crop overlay — semi-transparent dimming outside the crop window
+        if (imageLayoutSize.width > 0) {
+            androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                val iw = imageLayoutSize.width.toFloat()
+                val ih = imageLayoutSize.height.toFloat()
+
+                // Image might be letterboxed — calculate actual image rect within Fit layout
+                val displayW = size.width
+                val displayH = size.height
+                val imageAspect = iw / ih.coerceAtLeast(1f)
+                val viewAspect  = displayW / displayH.coerceAtLeast(1f)
+                val (imgX, imgY, imgW, imgH) = if (imageAspect > viewAspect) {
+                    // Letterbox top/bottom
+                    val w = displayW
+                    val h = displayW / imageAspect
+                    arrayOf((displayW - w) / 2f, (displayH - h) / 2f, w, h)
+                } else {
+                    // Pillarbox left/right
+                    val h = displayH
+                    val w = displayH * imageAspect
+                    arrayOf((displayW - w) / 2f, (displayH - h) / 2f, w, h)
+                }
+
+                val cL = imgX + cropLeft   * imgW
+                val cT = imgY + cropTop    * imgH
+                val cR = imgX + cropRight  * imgW
+                val cB = imgY + cropBottom * imgH
+
+                val dimColor = androidx.compose.ui.graphics.Color(0x99000000)
+                // Top bar
+                drawRect(dimColor, topLeft = androidx.compose.ui.geometry.Offset(0f, 0f),
+                    size = androidx.compose.ui.geometry.Size(displayW, cT))
+                // Bottom bar
+                drawRect(dimColor, topLeft = androidx.compose.ui.geometry.Offset(0f, cB),
+                    size = androidx.compose.ui.geometry.Size(displayW, displayH - cB))
+                // Left bar (between top and bottom)
+                drawRect(dimColor, topLeft = androidx.compose.ui.geometry.Offset(0f, cT),
+                    size = androidx.compose.ui.geometry.Size(cL, cB - cT))
+                // Right bar (between top and bottom)
+                drawRect(dimColor, topLeft = androidx.compose.ui.geometry.Offset(cR, cT),
+                    size = androidx.compose.ui.geometry.Size(displayW - cR, cB - cT))
+
+                // Crop border
+                val borderColor = androidx.compose.ui.graphics.Color.White
+                val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f)
+                drawRect(borderColor,
+                    topLeft = androidx.compose.ui.geometry.Offset(cL, cT),
+                    size = androidx.compose.ui.geometry.Size(cR - cL, cB - cT),
+                    style = stroke)
+
+                // Corner handles
+                val handleSize = 24f
+                val handleStroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 4f)
+                // TL
+                drawLine(borderColor, start = androidx.compose.ui.geometry.Offset(cL, cT + handleSize), end = androidx.compose.ui.geometry.Offset(cL, cT), strokeWidth = 4f)
+                drawLine(borderColor, start = androidx.compose.ui.geometry.Offset(cL, cT), end = androidx.compose.ui.geometry.Offset(cL + handleSize, cT), strokeWidth = 4f)
+                // TR
+                drawLine(borderColor, start = androidx.compose.ui.geometry.Offset(cR - handleSize, cT), end = androidx.compose.ui.geometry.Offset(cR, cT), strokeWidth = 4f)
+                drawLine(borderColor, start = androidx.compose.ui.geometry.Offset(cR, cT), end = androidx.compose.ui.geometry.Offset(cR, cT + handleSize), strokeWidth = 4f)
+                // BL
+                drawLine(borderColor, start = androidx.compose.ui.geometry.Offset(cL, cB - handleSize), end = androidx.compose.ui.geometry.Offset(cL, cB), strokeWidth = 4f)
+                drawLine(borderColor, start = androidx.compose.ui.geometry.Offset(cL, cB), end = androidx.compose.ui.geometry.Offset(cL + handleSize, cB), strokeWidth = 4f)
+                // BR
+                drawLine(borderColor, start = androidx.compose.ui.geometry.Offset(cR - handleSize, cB), end = androidx.compose.ui.geometry.Offset(cR, cB), strokeWidth = 4f)
+                drawLine(borderColor, start = androidx.compose.ui.geometry.Offset(cR, cB), end = androidx.compose.ui.geometry.Offset(cR, cB - handleSize), strokeWidth = 4f)
+
+                // Rule-of-thirds grid inside crop box
+                val thirdW = (cR - cL) / 3f
+                val thirdH = (cB - cT) / 3f
+                val gridColor = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.25f)
+                drawLine(gridColor, start = androidx.compose.ui.geometry.Offset(cL + thirdW, cT), end = androidx.compose.ui.geometry.Offset(cL + thirdW, cB), strokeWidth = 1f)
+                drawLine(gridColor, start = androidx.compose.ui.geometry.Offset(cL + thirdW * 2, cT), end = androidx.compose.ui.geometry.Offset(cL + thirdW * 2, cB), strokeWidth = 1f)
+                drawLine(gridColor, start = androidx.compose.ui.geometry.Offset(cL, cT + thirdH), end = androidx.compose.ui.geometry.Offset(cR, cT + thirdH), strokeWidth = 1f)
+                drawLine(gridColor, start = androidx.compose.ui.geometry.Offset(cL, cT + thirdH * 2), end = androidx.compose.ui.geometry.Offset(cR, cT + thirdH * 2), strokeWidth = 1f)
+            }
+
+            // Drag handler overlay
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(imageLayoutSize) {
+                        val displayW = size.width.toFloat()
+                        val displayH = size.height.toFloat()
+
+                        // Compute image-within-display rect
+                        val iw = imageLayoutSize.width.toFloat()
+                        val ih = imageLayoutSize.height.toFloat()
+                        val imageAspect = iw / ih.coerceAtLeast(1f)
+                        val viewAspect  = displayW / displayH.coerceAtLeast(1f)
+                        val (imgX, imgY, imgW, imgH) = if (imageAspect > viewAspect) {
+                            val w = displayW; val h = displayW / imageAspect
+                            arrayOf((displayW - w) / 2f, (displayH - h) / 2f, w, h)
+                        } else {
+                            val h = displayH; val w = displayH * imageAspect
+                            arrayOf((displayW - w) / 2f, (displayH - h) / 2f, w, h)
+                        }
+
+                        detectDragGestures(
+                            onDragStart = { offset ->
+                                val x = offset.x; val y = offset.y
+                                val cL = imgX + cropLeft   * imgW
+                                val cT = imgY + cropTop    * imgH
+                                val cR = imgX + cropRight  * imgW
+                                val cB = imgY + cropBottom * imgH
+                                val handleRadius = 36f
+
+                                dragStartLeft   = cropLeft
+                                dragStartTop    = cropTop
+                                dragStartRight  = cropRight
+                                dragStartBottom = cropBottom
+
+                                dragging = when {
+                                    kotlin.math.sqrt((x - cL).pow(2) + (y - cT).pow(2)) < handleRadius -> "tl"
+                                    kotlin.math.sqrt((x - cR).pow(2) + (y - cT).pow(2)) < handleRadius -> "tr"
+                                    kotlin.math.sqrt((x - cL).pow(2) + (y - cB).pow(2)) < handleRadius -> "bl"
+                                    kotlin.math.sqrt((x - cR).pow(2) + (y - cB).pow(2)) < handleRadius -> "br"
+                                    x in cL..cR && y in cT..cB -> "move"
+                                    else -> null
+                                }
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                val dx = dragAmount.x / imgW
+                                val dy = dragAmount.y / imgH
+                                when (dragging) {
+                                    "tl" -> {
+                                        cropLeft = (cropLeft + dx).coerceIn(0f, cropRight - minCrop)
+                                        cropTop  = (cropTop  + dy).coerceIn(0f, cropBottom - minCrop)
+                                    }
+                                    "tr" -> {
+                                        cropRight = (cropRight + dx).coerceIn(cropLeft + minCrop, 1f)
+                                        cropTop   = (cropTop  + dy).coerceIn(0f, cropBottom - minCrop)
+                                    }
+                                    "bl" -> {
+                                        cropLeft   = (cropLeft   + dx).coerceIn(0f, cropRight - minCrop)
+                                        cropBottom = (cropBottom + dy).coerceIn(cropTop + minCrop, 1f)
+                                    }
+                                    "br" -> {
+                                        cropRight  = (cropRight  + dx).coerceIn(cropLeft + minCrop, 1f)
+                                        cropBottom = (cropBottom + dy).coerceIn(cropTop + minCrop, 1f)
+                                    }
+                                    "move" -> {
+                                        val w = dragStartRight - dragStartLeft
+                                        val h = dragStartBottom - dragStartTop
+                                        val newL = (cropLeft + dx).coerceIn(0f, 1f - w)
+                                        val newT = (cropTop  + dy).coerceIn(0f, 1f - h)
+                                        cropLeft   = newL
+                                        cropTop    = newT
+                                        cropRight  = newL + w
+                                        cropBottom = newT + h
+                                    }
+                                }
+                            },
+                            onDragEnd = { dragging = null }
+                        )
+                    }
+            )
+        }
+
+        // Top bar: Cancel + title
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.TopCenter)
+                .background(Color.Black.copy(alpha = 0.55f))
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onCancel) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Cancel", tint = Color.White)
+            }
+            Text(
+                "Crop Background",
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 17.sp,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        // Bottom bar: Confirm button
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
+                .background(Color.Black.copy(alpha = 0.55f))
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Drag corners or box to adjust",
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 12.sp,
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(Modifier.width(8.dp))
+            Button(
+                onClick = {
+                    if (!isSaving) {
+                        isSaving = true
+                        scope.launch {
+                            val result = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                try {
+                                    val src = android.net.Uri.parse(imageUri)
+                                    // Decode the full image
+                                    val opts = android.graphics.BitmapFactory.Options().apply {
+                                        inJustDecodeBounds = false
+                                    }
+                                    val inputStream = context.contentResolver.openInputStream(src)
+                                        ?: java.io.File(imageUri.removePrefix("file://")).inputStream()
+                                    val full = android.graphics.BitmapFactory.decodeStream(inputStream, null, opts)
+                                        ?: return@withContext null
+                                    inputStream.close()
+
+                                    val fw = full.width.toFloat()
+                                    val fh = full.height.toFloat()
+                                    val x = (cropLeft * fw).toInt().coerceIn(0, full.width - 1)
+                                    val y = (cropTop  * fh).toInt().coerceIn(0, full.height - 1)
+                                    val w = ((cropRight - cropLeft) * fw).toInt().coerceIn(1, full.width - x)
+                                    val h = ((cropBottom - cropTop) * fh).toInt().coerceIn(1, full.height - y)
+
+                                    val cropped = android.graphics.Bitmap.createBitmap(full, x, y, w, h)
+                                    full.recycle()
+
+                                    // Save as new file alongside the original
+                                    val dir = java.io.File(context.filesDir, "bg_images").also { it.mkdirs() }
+                                    val dest = java.io.File(dir, "theme_bg_crop_${System.currentTimeMillis()}.jpg")
+                                    dest.outputStream().use { out ->
+                                        cropped.compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, out)
+                                    }
+                                    cropped.recycle()
+                                    android.net.Uri.fromFile(dest).toString()
+                                } catch (e: Exception) {
+                                    android.util.Log.e("ImageCrop", "Crop failed", e)
+                                    null
+                                }
+                            }
+                            isSaving = false
+                            if (result != null) {
+                                onConfirm(result)
+                            } else {
+                                // Fallback: use the image as-is if crop fails
+                                onConfirm(imageUri)
+                            }
+                        }
+                    }
+                },
+                enabled = !isSaving
+            ) {
+                if (isSaving) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Saving...")
+                } else {
+                    Icon(Icons.Default.Check, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Use this crop")
+                }
+            }
+        }
+    }
+}
+
+private fun Float.pow(n: Int): Float {
+    var result = 1f
+    repeat(n) { result *= this }
+    return result
 }
