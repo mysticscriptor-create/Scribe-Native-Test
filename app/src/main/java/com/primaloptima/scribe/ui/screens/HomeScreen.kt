@@ -265,57 +265,163 @@ fun HomeScreen(
                     .fillMaxWidth(0.78f)
                     .frostedPanel(hazeState)
             ) {
-                Spacer(modifier = Modifier.height(24.dp))
+                val drawerTheme = LocalAppTheme.current
+                val accentColor = drawerTheme?.let {
+                    parseComposeColor(it.colors.accent, MaterialTheme.colorScheme.primary)
+                } ?: MaterialTheme.colorScheme.primary
+                val (adaptiveTextColor, adaptiveTextModifier) = rememberAdaptiveTextColor(
+                    fallback = MaterialTheme.colorScheme.onSurface
+                )
+                val currentStreak by vm.currentStreak.collectAsState()
+
+                // ── HEADER: icon + wordmark + avatar + streak ──
+                Spacer(modifier = Modifier.height(28.dp))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 12.dp),
+                        .padding(horizontal = 20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        Icons.Outlined.EditNote,
-                        contentDescription = null,
-                        modifier = Modifier.size(32.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = "Scribe",
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    // Wordmark: "S" accented + "CRIBE" light small-caps
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            Icons.Outlined.EditNote,
+                            contentDescription = null,
+                            modifier = Modifier.size(28.dp),
+                            tint = accentColor
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "S",
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = accentColor,
+                            modifier = adaptiveTextModifier
+                        )
+                        Text(
+                            text = "CRIBE",
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Light,
+                            letterSpacing = 3.sp,
+                            color = adaptiveTextColor,
+                            modifier = adaptiveTextModifier
+                        )
+                    }
+                    // Avatar + streak pill (right-aligned column)
+                    Column(horizontalAlignment = Alignment.End) {
+                        // Circular avatar placeholder
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(accentColor.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Person,
+                                contentDescription = null,
+                                modifier = Modifier.size(22.dp),
+                                tint = accentColor
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        // Streak badge pill
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(accentColor.copy(alpha = 0.20f))
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = "🔥 $currentStreak ${if (currentStreak == 1) "Day" else "Days"}",
+                                fontSize = 11.sp,
+                                color = accentColor,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
                 }
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                NavigationDrawerItem(
-                    icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                    label = { Text("Settings") },
-                    selected = false,
-                    onClick = {
-                        scope.launch { drawerState.close() }
-                        onOpenSettings()
-                    },
-                    modifier = Modifier.padding(horizontal = 12.dp)
-                )
-                NavigationDrawerItem(
-                    icon = { Icon(Icons.Default.Book, contentDescription = null) },
-                    label = { Text("World Sheets") },
-                    selected = false,
-                    onClick = {
-                        scope.launch { drawerState.close() }
-                        onOpenSheets()
-                    },
-                    modifier = Modifier.padding(horizontal = 12.dp)
-                )
-                NavigationDrawerItem(
-                    icon = { Icon(Icons.Default.Palette, contentDescription = null) },
-                    label = { Text("Themes") },
-                    selected = false,
-                    onClick = {
-                        scope.launch { drawerState.close() }
-                        onOpenThemes()
-                    },
-                    modifier = Modifier.padding(horizontal = 12.dp)
-                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // ── INNER CARD with nav items ──
+                val innerCardBg = if (hazeState != null) {
+                    // Frosted glass active: semi-transparent overlay
+                    Color.White.copy(alpha = 0.07f)
+                } else {
+                    // No frosted glass: slightly lifted surface
+                    MaterialTheme.colorScheme.surface.copy(alpha = 0.12f)
+                }
+
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    color = innerCardBg,
+                    tonalElevation = 0.dp
+                ) {
+                    Column(modifier = Modifier.padding(vertical = 12.dp)) {
+
+                        // Section label: NAVIGATION
+                        Text(
+                            text = "NAVIGATION",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 1.5.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                            modifier = Modifier.padding(start = 16.dp, bottom = 4.dp)
+                        )
+
+                        // World Sheets item
+                        DrawerNavItem(
+                            icon = Icons.Default.Map,
+                            label = "World Sheets",
+                            accentColor = accentColor,
+                            onClick = {
+                                scope.launch { drawerState.close() }
+                                onOpenSheets()
+                            }
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Section label: TOOLS
+                        Text(
+                            text = "TOOLS",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 1.5.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                            modifier = Modifier.padding(start = 16.dp, bottom = 4.dp)
+                        )
+
+                        // Themes item
+                        DrawerNavItem(
+                            icon = Icons.Default.Palette,
+                            label = "Themes",
+                            accentColor = accentColor,
+                            onClick = {
+                                scope.launch { drawerState.close() }
+                                onOpenThemes()
+                            }
+                        )
+
+                        // Settings item
+                        DrawerNavItem(
+                            icon = Icons.Default.Settings,
+                            label = "Settings",
+                            accentColor = accentColor,
+                            onClick = {
+                                scope.launch { drawerState.close() }
+                                onOpenSettings()
+                            }
+                        )
+                    }
+                }
             }
             } // end CompositionLocalProvider(LocalOneShotBitmap provides oneShotBitmap)
         }
@@ -780,6 +886,35 @@ fun HomeScreen(
         )
     }
     } // end CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap)
+}
+
+@Composable
+private fun DrawerNavItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    accentColor: Color,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp),
+            tint = accentColor
+        )
+        Spacer(modifier = Modifier.width(14.dp))
+        Text(
+            text = label,
+            fontSize = 15.sp,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
 }
 
 @Composable

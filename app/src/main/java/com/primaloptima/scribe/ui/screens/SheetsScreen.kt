@@ -55,7 +55,8 @@ import kotlinx.coroutines.withContext
 @Composable
 fun SheetsScreen(
     vm: SheetsViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    openCreateOnLaunch: Boolean = false
 ) {
     val context = LocalContext.current
     val allEntries by vm.allEntries.observeAsState(emptyList())
@@ -65,6 +66,12 @@ fun SheetsScreen(
     var searchQuery by remember { mutableStateOf("") }
 
     var showCreateDialog by remember { mutableStateOf(false) }
+
+    // Auto-open the create dialog if launched with EXTRA_OPEN_CREATE
+    LaunchedEffect(Unit) {
+        if (openCreateOnLaunch) showCreateDialog = true
+    }
+
     var entryToDetail by remember { mutableStateOf<WorldEntry?>(null) }
     var entryToEdit by remember { mutableStateOf<WorldEntry?>(null) }
     var entryToDelete by remember { mutableStateOf<WorldEntry?>(null) }

@@ -11,6 +11,9 @@ import com.primaloptima.scribe.data.Book
 import com.primaloptima.scribe.data.Folder
 import com.primaloptima.scribe.data.Note
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -26,6 +29,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _searchResults = MutableLiveData<List<Book>>(emptyList())
     val searchResults: LiveData<List<Book>> = _searchResults
+
+    // ── Writing Streak ────────────────────────────────────────────────────────
+
+    private val _currentStreak = MutableStateFlow(app.prefs.getStreak().currentStreak)
+    val currentStreak: StateFlow<Int> = _currentStreak.asStateFlow()
+
+    fun refreshStreak() {
+        _currentStreak.value = app.prefs.getStreak().currentStreak
+    }
 
     // ── Quick Note Creation ──────────────────────────────────────────────────
 
