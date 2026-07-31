@@ -1304,29 +1304,44 @@ private fun ImageCropScreen(
         }
     }
 
-    // Crop box is a single moveable rectangle whose aspect ratio is fixed to
-    // screenAspect.  Stored as the top-left corner fraction (0..1) within the
-    // displayed image rect, plus the box width fraction.
-    // boxW is chosen so the box fits as large as possible inside the image.
-    val initialBoxW = remember(screenAspect) {
-        // Maximum width such that boxH = boxW / screenAspect <= 1.0
-        if (screenAspect >= 1f) 1f else screenAspect
+    // Crop box stored as fraction of the displayed image rect.
+    // Aspect ratio is locked to screenAspect; user can pan AND pinch/corner-drag to resize.
+    // Re-initialised whenever intrinsic dimensions are decoded (intrinsicW/H start at 1f).
+    val initialBoxW = remember(screenAspect, intrinsicW, intrinsicH) {
+        val imageAspect = (intrinsicW / intrinsicH.coerceAtLeast(1f)).coerceAtLeast(0.01f)
+        if (screenAspect <= imageAspect) {
+            // Image is wider than screen ratio — height-constrained: fill height, boxW < 1
+            (screenAspect / imageAspect).coerceIn(0.1f, 1f)
+        } else {
+            // Image is taller than screen ratio — width-constrained: fill width
+            1f
+        }
     }
     val initialBoxH = remember(initialBoxW, screenAspect) {
-        initialBoxW / screenAspect
+        (initialBoxW / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.1f, 1f)
     }
 
-    // Top-left corner of the crop box, as fractions of the image's displayed size.
-    var boxLeft by remember { androidx.compose.runtime.mutableFloatStateOf((1f - initialBoxW) / 2f) }
-    var boxTop  by remember { androidx.compose.runtime.mutableFloatStateOf((1f - initialBoxH) / 2f) }
+    // Top-left corner as fractions of displayed image size.
+    var boxLeft by remember(initialBoxW) { androidx.compose.runtime.mutableFloatStateOf((1f - initialBoxW) / 2f) }
+    var boxTop  by remember(initialBoxH) { androidx.compose.runtime.mutableFloatStateOf((1f - initialBoxH) / 2f) }
+    // Width fraction only — height derived from it so ratio never drifts.
+    var boxW    by remember(initialBoxW) { androidx.compose.runtime.mutableFloatStateOf(initialBoxW) }
+    val boxH get() = (boxW / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.01f, 1f)
 
-    // Derived right/bottom — never stored separately so aspect ratio can't drift.
-    val boxW = initialBoxW
-    val boxH = initialBoxH
+    // Keeps box inside [0,1]² after any resize or pan.
+    fun clampBox() {
+        val h = boxH
+        boxLeft = boxLeft.coerceIn(0f, (1f - boxW).coerceAtLeast(0f))
+        boxTop  = boxTop .coerceIn(0f, (1f - h  ).coerceAtLeast(0f))
+    }
 
+    // Pan state
     var isDraggingBox by remember { androidx.compose.runtime.mutableStateOf(false) }
     var dragStartBoxLeft by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     var dragStartBoxTop  by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+
+    // Corner resize — which corner is being dragged (null = none)
+    var activeCorner by remember { androidx.compose.runtime.mutableStateOf<String?>(null) } // "TL","TR","BL","BR"
 
     var isSaving by remember { androidx.compose.runtime.mutableStateOf(false) }
 
@@ -1417,42 +1432,97 @@ private fun ImageCropScreen(
             drawLine(gridColor, androidx.compose.ui.geometry.Offset(cL, cT + thirdH * 2), androidx.compose.ui.geometry.Offset(cR, cT + thirdH * 2), strokeWidth = 1f)
         }
 
-        // Touch handler — drag to reposition the crop box
+        // Touch handler — pan inside box, corner-drag to resize (locked aspect ratio)
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(intrinsicW, intrinsicH) {
                     val displayW = size.width.toFloat()
                     val displayH = size.height.toFloat()
+                    val cornerHitPx = 48f // touch slop for corner hit-test
 
                     detectDragGestures(
                         onDragStart = { offset ->
                             val (imgX, imgY, imgW, imgH) = imageRect(displayW, displayH)
-                            val cL = imgX + boxLeft       * imgW
-                            val cT = imgY + boxTop        * imgH
+                            val cL = imgX + boxLeft         * imgW
+                            val cT = imgY + boxTop          * imgH
                             val cR = imgX + (boxLeft + boxW) * imgW
                             val cB = imgY + (boxTop  + boxH) * imgH
 
-                            // Start a drag if the touch is inside the crop box
-                            isDraggingBox = offset.x in cL..cR && offset.y in cT..cB
-                            if (isDraggingBox) {
-                                dragStartBoxLeft = boxLeft
-                                dragStartBoxTop  = boxTop
+                            // Check corners first (larger hit area than the handle lines)
+                            activeCorner = when {
+                                offset.x in (cL - cornerHitPx)..(cL + cornerHitPx) &&
+                                offset.y in (cT - cornerHitPx)..(cT + cornerHitPx) -> "TL"
+                                offset.x in (cR - cornerHitPx)..(cR + cornerHitPx) &&
+                                offset.y in (cT - cornerHitPx)..(cT + cornerHitPx) -> "TR"
+                                offset.x in (cL - cornerHitPx)..(cL + cornerHitPx) &&
+                                offset.y in (cB - cornerHitPx)..(cB + cornerHitPx) -> "BL"
+                                offset.x in (cR - cornerHitPx)..(cR + cornerHitPx) &&
+                                offset.y in (cB - cornerHitPx)..(cB + cornerHitPx) -> "BR"
+                                else -> null
+                            }
+
+                            // If not a corner, check for pan inside box
+                            if (activeCorner == null) {
+                                isDraggingBox = offset.x in cL..cR && offset.y in cT..cB
+                                if (isDraggingBox) {
+                                    dragStartBoxLeft = boxLeft
+                                    dragStartBoxTop  = boxTop
+                                }
                             }
                         },
                         onDrag = { change, dragAmount ->
                             change.consume()
-                            if (!isDraggingBox) return@detectDragGestures
-
                             val (_, _, imgW, imgH) = imageRect(displayW, displayH)
                             val dx = dragAmount.x / imgW
                             val dy = dragAmount.y / imgH
+                            val corner = activeCorner
 
-                            // Clamp so the box never moves outside the image (0..1 space)
-                            boxLeft = (boxLeft + dx).coerceIn(0f, (1f - boxW).coerceAtLeast(0f))
-                            boxTop  = (boxTop  + dy).coerceIn(0f, (1f - boxH).coerceAtLeast(0f))
+                            if (corner != null) {
+                                // Corner drag — resize keeping aspect ratio locked.
+                                // Drive off whichever axis moved more (avoids jitter).
+                                val newW: Float
+                                val newLeft: Float
+                                val newTop: Float
+                                when (corner) {
+                                    "BR" -> {
+                                        newW    = (boxW + dx).coerceIn(0.1f, 1f - boxLeft)
+                                        newLeft = boxLeft
+                                        newTop  = boxTop
+                                    }
+                                    "BL" -> {
+                                        val proposed = (boxW - dx).coerceIn(0.1f, boxLeft + boxW)
+                                        newW    = proposed
+                                        newLeft = (boxLeft + boxW - proposed).coerceIn(0f, 1f - proposed)
+                                        newTop  = boxTop
+                                    }
+                                    "TR" -> {
+                                        newW    = (boxW + dx).coerceIn(0.1f, 1f - boxLeft)
+                                        newLeft = boxLeft
+                                        val newH = newW / screenAspect.coerceAtLeast(0.01f)
+                                        newTop  = (boxTop + boxH - newH).coerceIn(0f, 1f - newH)
+                                    }
+                                    else -> { // TL
+                                        val proposed = (boxW - dx).coerceIn(0.1f, boxLeft + boxW)
+                                        newW    = proposed
+                                        newLeft = (boxLeft + boxW - proposed).coerceIn(0f, 1f - proposed)
+                                        val newH = proposed / screenAspect.coerceAtLeast(0.01f)
+                                        newTop  = (boxTop + boxH - newH).coerceIn(0f, 1f - newH)
+                                    }
+                                }
+                                boxW    = newW
+                                boxLeft = newLeft
+                                boxTop  = newTop
+                                clampBox()
+                            } else if (isDraggingBox) {
+                                boxLeft = (boxLeft + dx).coerceIn(0f, (1f - boxW).coerceAtLeast(0f))
+                                boxTop  = (boxTop  + dy).coerceIn(0f, (1f - boxH).coerceAtLeast(0f))
+                            }
                         },
-                        onDragEnd = { isDraggingBox = false }
+                        onDragEnd = {
+                            isDraggingBox = false
+                            activeCorner  = null
+                        }
                     )
                 }
         )
@@ -1491,7 +1561,7 @@ private fun ImageCropScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                "Drag the box to choose a region",
+                "Drag to move · corners to resize",
                 color = Color.White.copy(alpha = 0.7f),
                 fontSize = 12.sp,
                 modifier = Modifier.weight(1f)
