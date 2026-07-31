@@ -64,7 +64,7 @@ fun ScribeSplash(onFinished: () -> Unit) {
             Color.White
         }
     }
-    val mark = painterResource(R.drawable.scribe_splash_mark)
+    val mark = painterResource(R.drawable.scribe_splash_mark_vector)
     val fade = remember { Animatable(0f) }
     val breathing by rememberInfiniteTransition(label = "scribe-breathing")
         .animateFloat(
