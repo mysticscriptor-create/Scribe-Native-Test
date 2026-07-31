@@ -32,6 +32,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.layout.ContentScale
@@ -89,6 +90,7 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     var rightPanelVisible by remember { mutableStateOf(false) }
+    var fabExpanded by remember { mutableStateOf(false) }
 
     // One-shot blurred capture for pre-API-31 frosted glass on the left drawer
     val view = LocalView.current
@@ -142,6 +144,14 @@ fun HomeScreen(
     val pagerState = rememberPagerState(initialPage = 0) { 3 }
     LaunchedEffect(pagerState.currentPage) {
         selectedNavTab = pagerState.currentPage
+    }
+    // Collapse speed-dial whenever the user switches tabs
+    LaunchedEffect(selectedNavTab) {
+        fabExpanded = false
+    }
+    // Collapse speed-dial when the navigation drawer opens
+    LaunchedEffect(drawerState.currentValue) {
+        if (drawerState.currentValue == DrawerValue.Open) fabExpanded = false
     }
 
     // Search state
@@ -627,14 +637,145 @@ fun HomeScreen(
                     label = "fabSwitch"
                 ) { tab ->
                     when (tab) {
-                        0 -> FloatingActionButton(
-                            onClick = { scope.launch { captureForDialog { showCreateDialog = true } } },
-                            containerColor = frostedContainerColor(fallback = accentClr),
-                            contentColor = Color.White,
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.frostedFab(LocalHazeState.current)
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = "New Book")
+                        0 -> {
+                            // ── Morph speed-dial FAB ──
+                            AnimatedContent(
+                                targetState = fabExpanded,
+                                transitionSpec = {
+                                    if (targetState) {
+                                        // Expanding → spring scale from bottom-right + fade in
+                                        (scaleIn(
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessMedium
+                                            ),
+                                            transformOrigin = TransformOrigin(1f, 1f)
+                                        ) + fadeIn()) togetherWith
+                                        (scaleOut(
+                                            targetScale = 0.75f,
+                                            transformOrigin = TransformOrigin(1f, 1f)
+                                        ) + fadeOut(tween(100)))
+                                    } else {
+                                        // Collapsing → quick tween scale out + fade out
+                                        (scaleIn(
+                                            initialScale = 0.75f,
+                                            transformOrigin = TransformOrigin(1f, 1f)
+                                        ) + fadeIn(tween(100))) togetherWith
+                                        (scaleOut(
+                                            animationSpec = tween(180),
+                                            transformOrigin = TransformOrigin(1f, 1f)
+                                        ) + fadeOut(tween(180)))
+                                    }
+                                },
+                                label = "fabMorph"
+                            ) { expanded ->
+                                if (expanded) {
+                                    // ── Speed-dial card ──
+                                    var showItems by remember { mutableStateOf(false) }
+                                    LaunchedEffect(Unit) { showItems = true }
+
+                                    Surface(
+                                        shape = RoundedCornerShape(20.dp),
+                                        color = frostedContainerColor(
+                                            fallback = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+                                        ),
+                                        tonalElevation = 0.dp,
+                                        modifier = Modifier
+                                            .width(200.dp)
+                                            .frostedFab(LocalHazeState.current)
+                                    ) {
+                                        Column {
+                                            // Item 1 — New Book
+                                            AnimatedVisibility(
+                                                visible = showItems,
+                                                enter = fadeIn(tween(150)) + slideInVertically(
+                                                    initialOffsetY = { 30 },
+                                                    animationSpec = tween(200)
+                                                )
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clickable {
+                                                            fabExpanded = false
+                                                            scope.launch {
+                                                                captureForDialog { showCreateDialog = true }
+                                                            }
+                                                        }
+                                                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Add,
+                                                        contentDescription = "New Book",
+                                                        modifier = Modifier.size(18.dp),
+                                                        tint = accentClr
+                                                    )
+                                                    Spacer(modifier = Modifier.width(10.dp))
+                                                    Text(
+                                                        "New Book",
+                                                        fontSize = 15.sp,
+                                                        color = MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                }
+                                            }
+
+                                            HorizontalDivider(
+                                                thickness = 0.5.dp,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+                                            )
+
+                                            // Item 2 — New Sheet (staggered 60ms)
+                                            AnimatedVisibility(
+                                                visible = showItems,
+                                                enter = fadeIn(tween(150, delayMillis = 60)) +
+                                                        slideInVertically(
+                                                            initialOffsetY = { 30 },
+                                                            animationSpec = tween(200, delayMillis = 60)
+                                                        )
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clickable {
+                                                            fabExpanded = false
+                                                            context.startActivity(
+                                                                Intent(context, SheetsActivity::class.java)
+                                                                    .putExtra(SheetsActivity.EXTRA_OPEN_CREATE, true)
+                                                            )
+                                                        }
+                                                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(
+                                                        Icons.Outlined.Book,
+                                                        contentDescription = "New Sheet",
+                                                        modifier = Modifier.size(18.dp),
+                                                        tint = accentClr
+                                                    )
+                                                    Spacer(modifier = Modifier.width(10.dp))
+                                                    Text(
+                                                        "New Sheet",
+                                                        fontSize = 15.sp,
+                                                        color = MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // ── Collapsed FAB ──
+                                    FloatingActionButton(
+                                        onClick = { fabExpanded = true },
+                                        containerColor = frostedContainerColor(fallback = accentClr),
+                                        contentColor = Color.White,
+                                        shape = RoundedCornerShape(16.dp),
+                                        modifier = Modifier.frostedFab(LocalHazeState.current)
+                                    ) {
+                                        Icon(Icons.Default.Add, contentDescription = "New Book")
+                                    }
+                                }
+                            }
                         }
                         1 -> ExtendedFloatingActionButton(
                             onClick = {
@@ -718,6 +859,20 @@ fun HomeScreen(
                             )
                         }
                     }
+                }
+
+                // ── FAB speed-dial scrim — fades in behind the card, above pager ──
+                AnimatedVisibility(
+                    visible = fabExpanded && selectedNavTab == 0,
+                    enter = fadeIn(tween(200)),
+                    exit = fadeOut(tween(200))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.38f))
+                            .clickable { fabExpanded = false }
+                    )
                 }
 
                 // ── Right stats panel — swipe from right edge or tap Info button ──
