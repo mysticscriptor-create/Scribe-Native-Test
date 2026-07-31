@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.primaloptima.scribe.data.Book
 import com.primaloptima.scribe.ui.screens.HomeScreen
 import com.primaloptima.scribe.ui.theme.ScribeComposeTheme
@@ -17,9 +18,28 @@ class HomeActivity : ComponentActivity() {
     private val vm: HomeViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Must be called before super.onCreate()
+        val splashScreen = installSplashScreen()
         enableEdgeToEdge()
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
         super.onCreate(savedInstanceState)
+
+        // Hold the system splash until the DB has emitted its first result.
+        // vm.books.value is null until Room's first emission — then it becomes
+        // a List<Book> (possibly empty), which is our signal that we're ready.
+        splashScreen.setKeepOnScreenCondition {
+            vm.books.value == null
+        }
+
+        // Fade the splash out instead of snapping to the home screen.
+        splashScreen.setOnExitAnimationListener { splashViewProvider ->
+            splashViewProvider.view
+                .animate()
+                .alpha(0f)
+                .setDuration(300)
+                .withEndAction { splashViewProvider.remove() }
+                .start()
+        }
 
         setContent {
             ScribeComposeTheme {
