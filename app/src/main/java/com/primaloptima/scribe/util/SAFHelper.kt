@@ -57,7 +57,7 @@ object SAFHelper {
     suspend fun copyBgImageToInternalStorage(
         context: Context,
         sourceUri: Uri,
-        keepCount: Int = 6
+        keepCount: Int = 2
     ): Uri? = withContext(Dispatchers.IO) {
         try {
             val dir = File(context.filesDir, "bg_images").also { it.mkdirs() }
