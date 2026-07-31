@@ -69,6 +69,7 @@ fun ThemeListScreen(
     var showTopMenu by remember { mutableStateOf(false) }
 
     val view = LocalView.current
+    val blurRadiusPx = com.primaloptima.scribe.ui.theme.LocalFrostedBlurRadius.current.toInt().coerceIn(1, 25)
     val hazeState = LocalHazeState.current
     var dialogOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var dialogCaptured by remember { mutableStateOf(false) }
@@ -79,7 +80,7 @@ fun ThemeListScreen(
                 dialogCaptured = true
                 val raw = BitmapBlur.captureOnly(view)
                 dialogOneShotBitmap = withContext(Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
                 }
             } else if (!anyDialogOpen) {
                 dialogCaptured = false
@@ -157,7 +158,7 @@ fun ThemeListScreen(
                     )
                 },
                 containerColor = frostedContainerColor(fallback = MaterialTheme.colorScheme.primary),
-                modifier = Modifier.frostedFab(hazeState)
+                modifier = Modifier.frostedFab(hazeState, shape = androidx.compose.material3.FloatingActionButtonDefaults.shape)
             ) {
                 Icon(Icons.Default.Add, contentDescription = "New Theme")
             }

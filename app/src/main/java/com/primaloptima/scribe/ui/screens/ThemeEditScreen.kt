@@ -114,15 +114,6 @@ fun ThemeEditScreen(
     var showCropScreen by remember { mutableStateOf(false) }
     var pendingCropUri by remember { mutableStateOf<String?>(null) }
 
-    // Deletes old bg files from internal storage when they're no longer needed.
-    // Only touches file:// URIs — content:// and null are skipped safely.
-    fun deleteBgFiles(vararg uris: String?) {
-        uris.filterNotNull()
-            .filter { it.startsWith("file://") }
-            .map { java.io.File(it.removePrefix("file://")) }
-            .forEach { if (it.exists()) it.delete() }
-    }
-
     val view = LocalView.current
     val hazeState = LocalHazeState.current
     var dialogOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -134,7 +125,7 @@ fun ThemeEditScreen(
                 dialogCaptured = true
                 val raw = BitmapBlur.captureOnly(view)
                 dialogOneShotBitmap = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15).let { b -> BitmapBlur.applyFrostedGlassLook(b) } }
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = frostedBlurRadius.toInt().coerceIn(1, 25)).let { b -> BitmapBlur.applyFrostedGlassLook(b) } }
                 }
             } else if (!anyDialogOpen) {
                 dialogCaptured = false
@@ -178,17 +169,7 @@ fun ThemeEditScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = {
-                        // If the user picked a new image but didn't save, clean up the
-                        // newly copied files so they don't accumulate in bg_images/.
-                        if (bgUri != originalTheme.backgroundImageUri) {
-                            deleteBgFiles(bgUri)
-                        }
-                        if (bgOriginalUri != originalTheme.backgroundImageOriginalUri) {
-                            deleteBgFiles(bgOriginalUri)
-                        }
-                        onBack()
-                    }) {
+                    IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
@@ -289,7 +270,7 @@ fun ThemeEditScreen(
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     // Re-open crop screen for the current image
                                     TextButton(onClick = {
-                                        pendingCropUri = bgOriginalUri ?: bgUri
+                                        pendingCropUri = bgUri
                                         showCropScreen = true
                                     }) {
                                         Icon(
@@ -301,8 +282,6 @@ fun ThemeEditScreen(
                                         Text("Crop")
                                     }
                                     TextButton(onClick = {
-                                        deleteBgFiles(bgOriginalUri, bgUri)
-                                        bgOriginalUri = null
                                         bgUri = null
                                         bgMode = "color"
                                     }) {
@@ -824,11 +803,6 @@ fun ThemeEditScreen(
             ImageCropScreen(
                 imageUri = pendingCropUri!!,
                 onConfirm = { croppedUri ->
-                    // Delete the previous bg files before replacing — but only if they're
-                    // actually different from what we're about to set (re-cropping the same
-                    // original shouldn't delete the original we're still using).
-                    if (bgOriginalUri != pendingCropUri) deleteBgFiles(bgOriginalUri)
-                    if (bgUri != croppedUri) deleteBgFiles(bgUri)
                     bgOriginalUri = pendingCropUri  // preserve the full-res original
                     bgUri = croppedUri
                     if (bgMode == "color") bgMode = "image"
@@ -1304,44 +1278,29 @@ private fun ImageCropScreen(
         }
     }
 
-    // Crop box stored as fraction of the displayed image rect.
-    // Aspect ratio is locked to screenAspect; user can pan AND pinch/corner-drag to resize.
-    // Re-initialised whenever intrinsic dimensions are decoded (intrinsicW/H start at 1f).
-    val initialBoxW = remember(screenAspect, intrinsicW, intrinsicH) {
-        val imageAspect = (intrinsicW / intrinsicH.coerceAtLeast(1f)).coerceAtLeast(0.01f)
-        if (screenAspect <= imageAspect) {
-            // Image is wider than screen ratio — height-constrained: fill height, boxW < 1
-            (screenAspect / imageAspect).coerceIn(0.1f, 1f)
-        } else {
-            // Image is taller than screen ratio — width-constrained: fill width
-            1f
-        }
+    // Crop box is a single moveable rectangle whose aspect ratio is fixed to
+    // screenAspect.  Stored as the top-left corner fraction (0..1) within the
+    // displayed image rect, plus the box width fraction.
+    // boxW is chosen so the box fits as large as possible inside the image.
+    val initialBoxW = remember(screenAspect) {
+        // Maximum width such that boxH = boxW / screenAspect <= 1.0
+        if (screenAspect >= 1f) 1f else screenAspect
     }
     val initialBoxH = remember(initialBoxW, screenAspect) {
-        (initialBoxW / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.1f, 1f)
+        initialBoxW / screenAspect
     }
 
-    // Top-left corner as fractions of displayed image size.
-    var boxLeft by remember(initialBoxW) { androidx.compose.runtime.mutableFloatStateOf((1f - initialBoxW) / 2f) }
-    var boxTop  by remember(initialBoxH) { androidx.compose.runtime.mutableFloatStateOf((1f - initialBoxH) / 2f) }
-    // Width fraction only — height derived from it so ratio never drifts.
-    var boxW    by remember(initialBoxW) { androidx.compose.runtime.mutableFloatStateOf(initialBoxW) }
-    val boxH get() = (boxW / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.01f, 1f)
+    // Top-left corner of the crop box, as fractions of the image's displayed size.
+    var boxLeft by remember { androidx.compose.runtime.mutableFloatStateOf((1f - initialBoxW) / 2f) }
+    var boxTop  by remember { androidx.compose.runtime.mutableFloatStateOf((1f - initialBoxH) / 2f) }
 
-    // Keeps box inside [0,1]² after any resize or pan.
-    fun clampBox() {
-        val h = boxH
-        boxLeft = boxLeft.coerceIn(0f, (1f - boxW).coerceAtLeast(0f))
-        boxTop  = boxTop .coerceIn(0f, (1f - h  ).coerceAtLeast(0f))
-    }
+    // Derived right/bottom — never stored separately so aspect ratio can't drift.
+    val boxW = initialBoxW
+    val boxH = initialBoxH
 
-    // Pan state
     var isDraggingBox by remember { androidx.compose.runtime.mutableStateOf(false) }
     var dragStartBoxLeft by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     var dragStartBoxTop  by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
-
-    // Corner resize — which corner is being dragged (null = none)
-    var activeCorner by remember { androidx.compose.runtime.mutableStateOf<String?>(null) } // "TL","TR","BL","BR"
 
     var isSaving by remember { androidx.compose.runtime.mutableStateOf(false) }
 
@@ -1432,97 +1391,42 @@ private fun ImageCropScreen(
             drawLine(gridColor, androidx.compose.ui.geometry.Offset(cL, cT + thirdH * 2), androidx.compose.ui.geometry.Offset(cR, cT + thirdH * 2), strokeWidth = 1f)
         }
 
-        // Touch handler — pan inside box, corner-drag to resize (locked aspect ratio)
+        // Touch handler — drag to reposition the crop box
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(intrinsicW, intrinsicH) {
                     val displayW = size.width.toFloat()
                     val displayH = size.height.toFloat()
-                    val cornerHitPx = 48f // touch slop for corner hit-test
 
                     detectDragGestures(
                         onDragStart = { offset ->
                             val (imgX, imgY, imgW, imgH) = imageRect(displayW, displayH)
-                            val cL = imgX + boxLeft         * imgW
-                            val cT = imgY + boxTop          * imgH
+                            val cL = imgX + boxLeft       * imgW
+                            val cT = imgY + boxTop        * imgH
                             val cR = imgX + (boxLeft + boxW) * imgW
                             val cB = imgY + (boxTop  + boxH) * imgH
 
-                            // Check corners first (larger hit area than the handle lines)
-                            activeCorner = when {
-                                offset.x in (cL - cornerHitPx)..(cL + cornerHitPx) &&
-                                offset.y in (cT - cornerHitPx)..(cT + cornerHitPx) -> "TL"
-                                offset.x in (cR - cornerHitPx)..(cR + cornerHitPx) &&
-                                offset.y in (cT - cornerHitPx)..(cT + cornerHitPx) -> "TR"
-                                offset.x in (cL - cornerHitPx)..(cL + cornerHitPx) &&
-                                offset.y in (cB - cornerHitPx)..(cB + cornerHitPx) -> "BL"
-                                offset.x in (cR - cornerHitPx)..(cR + cornerHitPx) &&
-                                offset.y in (cB - cornerHitPx)..(cB + cornerHitPx) -> "BR"
-                                else -> null
-                            }
-
-                            // If not a corner, check for pan inside box
-                            if (activeCorner == null) {
-                                isDraggingBox = offset.x in cL..cR && offset.y in cT..cB
-                                if (isDraggingBox) {
-                                    dragStartBoxLeft = boxLeft
-                                    dragStartBoxTop  = boxTop
-                                }
+                            // Start a drag if the touch is inside the crop box
+                            isDraggingBox = offset.x in cL..cR && offset.y in cT..cB
+                            if (isDraggingBox) {
+                                dragStartBoxLeft = boxLeft
+                                dragStartBoxTop  = boxTop
                             }
                         },
                         onDrag = { change, dragAmount ->
                             change.consume()
+                            if (!isDraggingBox) return@detectDragGestures
+
                             val (_, _, imgW, imgH) = imageRect(displayW, displayH)
                             val dx = dragAmount.x / imgW
                             val dy = dragAmount.y / imgH
-                            val corner = activeCorner
 
-                            if (corner != null) {
-                                // Corner drag — resize keeping aspect ratio locked.
-                                // Drive off whichever axis moved more (avoids jitter).
-                                val newW: Float
-                                val newLeft: Float
-                                val newTop: Float
-                                when (corner) {
-                                    "BR" -> {
-                                        newW    = (boxW + dx).coerceIn(0.1f, 1f - boxLeft)
-                                        newLeft = boxLeft
-                                        newTop  = boxTop
-                                    }
-                                    "BL" -> {
-                                        val proposed = (boxW - dx).coerceIn(0.1f, boxLeft + boxW)
-                                        newW    = proposed
-                                        newLeft = (boxLeft + boxW - proposed).coerceIn(0f, 1f - proposed)
-                                        newTop  = boxTop
-                                    }
-                                    "TR" -> {
-                                        newW    = (boxW + dx).coerceIn(0.1f, 1f - boxLeft)
-                                        newLeft = boxLeft
-                                        val newH = newW / screenAspect.coerceAtLeast(0.01f)
-                                        newTop  = (boxTop + boxH - newH).coerceIn(0f, 1f - newH)
-                                    }
-                                    else -> { // TL
-                                        val proposed = (boxW - dx).coerceIn(0.1f, boxLeft + boxW)
-                                        newW    = proposed
-                                        newLeft = (boxLeft + boxW - proposed).coerceIn(0f, 1f - proposed)
-                                        val newH = proposed / screenAspect.coerceAtLeast(0.01f)
-                                        newTop  = (boxTop + boxH - newH).coerceIn(0f, 1f - newH)
-                                    }
-                                }
-                                boxW    = newW
-                                boxLeft = newLeft
-                                boxTop  = newTop
-                                clampBox()
-                            } else if (isDraggingBox) {
-                                boxLeft = (boxLeft + dx).coerceIn(0f, (1f - boxW).coerceAtLeast(0f))
-                                boxTop  = (boxTop  + dy).coerceIn(0f, (1f - boxH).coerceAtLeast(0f))
-                            }
+                            // Clamp so the box never moves outside the image (0..1 space)
+                            boxLeft = (boxLeft + dx).coerceIn(0f, (1f - boxW).coerceAtLeast(0f))
+                            boxTop  = (boxTop  + dy).coerceIn(0f, (1f - boxH).coerceAtLeast(0f))
                         },
-                        onDragEnd = {
-                            isDraggingBox = false
-                            activeCorner  = null
-                        }
+                        onDragEnd = { isDraggingBox = false }
                     )
                 }
         )
@@ -1561,7 +1465,7 @@ private fun ImageCropScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                "Drag to move · corners to resize",
+                "Drag the box to choose a region",
                 color = Color.White.copy(alpha = 0.7f),
                 fontSize = 12.sp,
                 modifier = Modifier.weight(1f)

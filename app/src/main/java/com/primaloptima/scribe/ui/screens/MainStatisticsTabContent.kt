@@ -138,6 +138,7 @@ private fun DetailedStatisticsTab(
     var showGoalDialog by remember { mutableStateOf(false) }
 
     val view = androidx.compose.ui.platform.LocalView.current
+    val blurRadiusPx = com.primaloptima.scribe.ui.theme.LocalFrostedBlurRadius.current.toInt().coerceIn(1, 25)
     var dialogOneShotBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
     var dialogCaptured by remember { mutableStateOf(false) }
     if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) {
@@ -146,7 +147,7 @@ private fun DetailedStatisticsTab(
                 dialogCaptured = true
                 val raw = BitmapBlur.captureOnly(view)
                 dialogOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
                 }
             } else if (!showGoalDialog) {
                 dialogCaptured = false

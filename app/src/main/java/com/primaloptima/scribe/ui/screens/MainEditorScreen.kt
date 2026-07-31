@@ -106,6 +106,7 @@ fun MainEditorScreen(
     // One-shot blurred captures for pre-API-31 frosted glass.
     // Captured once when each drawer starts opening; cleared when it closes.
     val view = LocalView.current
+    val blurRadiusPx = com.primaloptima.scribe.ui.theme.LocalFrostedBlurRadius.current.toInt().coerceIn(1, 25)
     var leftOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var rightOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
     // Track whether we've already captured for the current open gesture
@@ -126,7 +127,7 @@ fun MainEditorScreen(
                 kotlinx.coroutines.delay(150)
                 val raw = BitmapBlur.captureOnly(view)
                 barBlurBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
                 }
             }
         }
@@ -140,9 +141,10 @@ fun MainEditorScreen(
                 leftCaptured = true
                 val raw = BitmapBlur.captureOnly(view)  // must stay on Main thread
                 leftOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
                 }
-            } else if (leftDrawerState.currentValue == DrawerValue.Closed) {
+            } else if (leftDrawerState.currentValue == DrawerValue.Closed &&
+                       leftDrawerState.targetValue == DrawerValue.Closed) {
                 leftCaptured = false
                 leftOneShotBitmap = null
             }
@@ -152,9 +154,10 @@ fun MainEditorScreen(
                 rightCaptured = true
                 val rawRight = BitmapBlur.captureOnly(view)  // must stay on Main thread
                 rightOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    rawRight?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                    rawRight?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
                 }
-            } else if (rightDrawerState.currentValue == DrawerValue.Closed) {
+            } else if (rightDrawerState.currentValue == DrawerValue.Closed &&
+                       rightDrawerState.targetValue == DrawerValue.Closed) {
                 rightCaptured = false
                 rightOneShotBitmap = null
             }
@@ -218,7 +221,7 @@ fun MainEditorScreen(
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             val raw = BitmapBlur.captureOnly(view)
             dialogOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
             }
         }
         openDialog()

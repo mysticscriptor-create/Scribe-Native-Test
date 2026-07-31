@@ -72,6 +72,7 @@ fun BookScreen(
 
     // One-shot blurred capture for pre-API-31 frosted glass (FABs + dialogs)
     val view = LocalView.current
+    val blurRadiusPx = com.primaloptima.scribe.ui.theme.LocalFrostedBlurRadius.current.toInt().coerceIn(1, 25)
     var oneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var captured by remember { mutableStateOf(false) }
     var isFabExpanded by remember { mutableStateOf(false) }
@@ -95,7 +96,7 @@ fun BookScreen(
                 captured = true
                 val raw = BitmapBlur.captureOnly(view)  // Main thread (LaunchedEffect default)
                 oneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
                 }
             } else if (!isFabExpanded) {
                 captured = false
@@ -113,7 +114,7 @@ fun BookScreen(
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             val raw = BitmapBlur.captureOnly(view)
             dialogOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
             }
         }
         openDialog()
