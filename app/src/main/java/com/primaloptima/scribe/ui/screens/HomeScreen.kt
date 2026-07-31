@@ -294,26 +294,17 @@ fun HomeScreen(
                         .padding(horizontal = 20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Wordmark: app icon (S + quill) + "CRIBE" light small-caps
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_launcher_foreground),
-                            contentDescription = "Scribe",
-                            modifier = Modifier.size(40.dp).offset(x = (-4).dp),
-                            tint = accentColor
-                        )
-                        Text(
-                            text = "CRIBE",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Light,
-                            letterSpacing = 3.sp,
-                            color = adaptiveTextColor,
-                            modifier = adaptiveTextModifier
-                        )
-                    }
+                    // Wordmark: single two-color vector (S+quill in accent, CRIBE in onSurface)
+                    // tint = Color.Unspecified is required so per-path colors are respected
+                    Icon(
+                        painter = painterResource(R.drawable.ic_scribe_wordmark),
+                        contentDescription = "Scribe",
+                        tint = Color.Unspecified,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(36.dp)
+                            .wrapContentWidth(Alignment.Start)
+                    )
                     // Avatar + streak pill (right-aligned column)
                     Column(horizontalAlignment = Alignment.End) {
                         // Circular avatar placeholder
