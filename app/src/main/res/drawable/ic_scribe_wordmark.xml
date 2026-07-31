@@ -6,7 +6,7 @@
         Icon(
             painter = painterResource(R.drawable.ic_scribe_wordmark),
             contentDescription = "Scribe",
-            tint = Color.Unspecified   // <-- REQUIRED so per-path colors are respected
+            tint = Color.Unspecified   (REQUIRED: lets per-path colors show through)
         )
     The colors below reference theme attributes so they auto-adapt to
     light/dark and your custom accent via LocalAppTheme.
