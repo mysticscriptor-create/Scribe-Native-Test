@@ -54,6 +54,11 @@ class HomeActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        vm.refreshStreak()
+    }
+
     private fun openBook(book: Book) {
         startActivity(
             Intent(this, BookActivity::class.java)

@@ -16,13 +16,19 @@ class SheetsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        val openCreateOnLaunch = intent.getBooleanExtra(EXTRA_OPEN_CREATE, false)
         setContent {
             ScribeComposeTheme {
                 SheetsScreen(
                     vm = vm,
-                    onBack = { finish() }
+                    onBack = { finish() },
+                    openCreateOnLaunch = openCreateOnLaunch
                 )
             }
         }
+    }
+
+    companion object {
+        const val EXTRA_OPEN_CREATE = "open_create"
     }
 }
