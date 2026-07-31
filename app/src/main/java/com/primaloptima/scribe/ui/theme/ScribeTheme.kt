@@ -145,8 +145,9 @@ fun Modifier.frostedBar(hazeState: HazeState?): Modifier {
         // Use the pre-blurred wallpaper bitmap — already has applyFrostedGlassLook applied
         this.drawWithOneShotBitmap(barBlurBitmap, tintColor)
     } else {
-        // No bitmap yet (still loading) — opaque fallback so wallpaper never bleeds through
-        this.background(solidSurface)
+        // Bitmap still loading — show transparent so the background image shows through
+        // cleanly with a light tint, avoiding the opaque-then-blur snap.
+        this.background(tintColor)
     }
 }
 
@@ -157,7 +158,10 @@ fun Modifier.frostedBar(hazeState: HazeState?): Modifier {
  * When there is no background image the modifier is a no-op.
  */
 @Composable
-fun Modifier.frostedFab(hazeState: HazeState?): Modifier {
+fun Modifier.frostedFab(
+    hazeState: HazeState?,
+    shape: androidx.compose.ui.graphics.Shape = androidx.compose.foundation.shape.CircleShape
+): Modifier {
     val solidSurface = LocalSolidSurface.current
     val barBlurBitmap = LocalBarBlurBitmap.current   // pre-blurred wallpaper, for bars/FABs
     val hasBgImage = localHasBgImage()
@@ -168,19 +172,18 @@ fun Modifier.frostedFab(hazeState: HazeState?): Modifier {
         this
     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hazeState != null) {
         this
-            .clip(androidx.compose.foundation.shape.CircleShape)
+            .clip(shape)
             .hazeEffect(
                 state = hazeState,
                 style = HazeStyle(blurRadius = blurRadius.dp, tint = HazeTint(tintColor), noiseFactor = 0f)
             )
     } else if (barBlurBitmap != null) {
-        // Use the pre-blurred wallpaper bitmap — already has applyFrostedGlassLook applied
         this
-            .clip(androidx.compose.foundation.shape.CircleShape)
+            .clip(shape)
             .drawWithOneShotBitmap(barBlurBitmap, tintColor)
     } else {
-        // No bitmap yet — opaque fallback so wallpaper never bleeds through
-        this.background(solidSurface, shape = androidx.compose.foundation.shape.CircleShape)
+        // Bitmap still loading — transparent tint so image shows through without snap
+        this.background(tintColor, shape = shape)
     }
 }
 
@@ -769,7 +772,7 @@ fun ScribeComposeTheme(
     // Dialogs and drawers are unaffected (they use LocalOneShotBitmap).
     val barBlurBitmap by produceState<Bitmap?>(
         initialValue = null,
-        keys = arrayOf(bgUri, bgMode, softwareBlurredModel, softwareImageModel)
+        keys = arrayOf(bgUri, bgMode, softwareBlurredModel, softwareImageModel, frostedBlurRadius)
     ) {
         value = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S || !hasBgImage) {
@@ -860,11 +863,15 @@ fun ScribeComposeTheme(
                                     } else Modifier
                                 )
                         )
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(bg.copy(alpha = bgOpacity))
-                        )
+                        // Only apply the colour tint overlay in "blurred" mode.
+                        // In "image" mode the user wants the image as-is — no wash.
+                        if (bgMode == "blurred" && bgOpacity > 0f) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(bg.copy(alpha = bgOpacity))
+                            )
+                        }
                     }
 
                     content()
