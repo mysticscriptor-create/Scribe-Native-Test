@@ -114,6 +114,15 @@ fun ThemeEditScreen(
     var showCropScreen by remember { mutableStateOf(false) }
     var pendingCropUri by remember { mutableStateOf<String?>(null) }
 
+    // Deletes old bg files from internal storage when they're no longer needed.
+    // Only touches file:// URIs — content:// and null are skipped safely.
+    fun deleteBgFiles(vararg uris: String?) {
+        uris.filterNotNull()
+            .filter { it.startsWith("file://") }
+            .map { java.io.File(it.removePrefix("file://")) }
+            .forEach { if (it.exists()) it.delete() }
+    }
+
     val view = LocalView.current
     val hazeState = LocalHazeState.current
     var dialogOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -169,7 +178,17 @@ fun ThemeEditScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = {
+                        // If the user picked a new image but didn't save, clean up the
+                        // newly copied files so they don't accumulate in bg_images/.
+                        if (bgUri != originalTheme.backgroundImageUri) {
+                            deleteBgFiles(bgUri)
+                        }
+                        if (bgOriginalUri != originalTheme.backgroundImageOriginalUri) {
+                            deleteBgFiles(bgOriginalUri)
+                        }
+                        onBack()
+                    }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
@@ -270,7 +289,7 @@ fun ThemeEditScreen(
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     // Re-open crop screen for the current image
                                     TextButton(onClick = {
-                                        pendingCropUri = bgUri
+                                        pendingCropUri = bgOriginalUri ?: bgUri
                                         showCropScreen = true
                                     }) {
                                         Icon(
@@ -282,6 +301,8 @@ fun ThemeEditScreen(
                                         Text("Crop")
                                     }
                                     TextButton(onClick = {
+                                        deleteBgFiles(bgOriginalUri, bgUri)
+                                        bgOriginalUri = null
                                         bgUri = null
                                         bgMode = "color"
                                     }) {
@@ -803,6 +824,11 @@ fun ThemeEditScreen(
             ImageCropScreen(
                 imageUri = pendingCropUri!!,
                 onConfirm = { croppedUri ->
+                    // Delete the previous bg files before replacing — but only if they're
+                    // actually different from what we're about to set (re-cropping the same
+                    // original shouldn't delete the original we're still using).
+                    if (bgOriginalUri != pendingCropUri) deleteBgFiles(bgOriginalUri)
+                    if (bgUri != croppedUri) deleteBgFiles(bgUri)
                     bgOriginalUri = pendingCropUri  // preserve the full-res original
                     bgUri = croppedUri
                     if (bgMode == "color") bgMode = "image"
