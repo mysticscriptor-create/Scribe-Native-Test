@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import com.primaloptima.scribe.ui.theme.LocalAppTheme
 import android.graphics.Bitmap
 import android.os.Build
@@ -292,25 +293,18 @@ fun HomeScreen(
                         .padding(horizontal = 20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Wordmark: "S" accented + "CRIBE" light small-caps
+                    // Wordmark: app icon (S + quill) + "CRIBE" light small-caps
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(
-                            Icons.Outlined.EditNote,
-                            contentDescription = null,
-                            modifier = Modifier.size(28.dp),
+                            painter = painterResource(R.drawable.ic_launcher_foreground),
+                            contentDescription = "Scribe",
+                            modifier = Modifier.size(36.dp),
                             tint = accentColor
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "S",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = accentColor,
-                            modifier = adaptiveTextModifier
-                        )
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = "CRIBE",
                             fontSize = 22.sp,
