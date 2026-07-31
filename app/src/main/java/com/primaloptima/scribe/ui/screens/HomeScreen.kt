@@ -67,6 +67,7 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.allowHardware
 import com.primaloptima.scribe.*
+import com.primaloptima.scribe.R
 import com.primaloptima.scribe.data.Book
 import com.primaloptima.scribe.data.Folder
 import com.primaloptima.scribe.data.Note
@@ -299,9 +300,9 @@ fun HomeScreen(
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(
-                            painter = painterResource(R.drawable.scribe_splash_mark_vector),
+                            painter = painterResource(R.drawable.ic_launcher_foreground),
                             contentDescription = "Scribe",
-                            modifier = Modifier.size(38.dp),
+                            modifier = Modifier.size(36.dp),
                             tint = accentColor
                         )
                         Spacer(modifier = Modifier.width(4.dp))
