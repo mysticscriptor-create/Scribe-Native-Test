@@ -2,6 +2,8 @@ package com.primaloptima.scribe
 
 import android.app.Application
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.provider.FontRequest
 import androidx.core.provider.FontsContractCompat
@@ -36,7 +38,8 @@ class ScribeApp : Application() {
      * Kicks off background prefetch for all Google Fonts used by Scribe.
      * Without this, fonts are fetched lazily on first use, which can cause
      * a brief flash of the fallback system font on first launch.
-     * The handler = null means requests run on a background thread automatically.
+     * Handler is required by newer FontsContractCompat API; main looper is fine
+     * since the callback is a no-op and the actual fetch runs on a background thread.
      */
     private fun preloadGoogleFonts() {
         val fonts = listOf(
@@ -63,7 +66,7 @@ class ScribeApp : Application() {
                     object : FontsContractCompat.FontRequestCallback() {
                         // No-op callbacks — we just want the prefetch side-effect
                     },
-                    null
+                    Handler(Looper.getMainLooper())
                 )
             } catch (_: Exception) {
                 // Font prefetch is best-effort; failures are silent
