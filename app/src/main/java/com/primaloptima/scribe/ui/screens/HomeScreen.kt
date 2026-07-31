@@ -299,9 +299,9 @@ fun HomeScreen(
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(
-                            painter = painterResource(R.drawable.ic_launcher_foreground),
+                            painter = painterResource(R.drawable.scribe_splash_mark_vector),
                             contentDescription = "Scribe",
-                            modifier = Modifier.size(36.dp),
+                            modifier = Modifier.size(38.dp),
                             tint = accentColor
                         )
                         Spacer(modifier = Modifier.width(4.dp))
