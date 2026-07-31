@@ -55,7 +55,8 @@ import kotlinx.coroutines.withContext
 @Composable
 fun SheetsScreen(
     vm: SheetsViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    openCreateOnLaunch: Boolean = false
 ) {
     val context = LocalContext.current
     val allEntries by vm.allEntries.observeAsState(emptyList())
@@ -65,12 +66,17 @@ fun SheetsScreen(
     var searchQuery by remember { mutableStateOf("") }
 
     var showCreateDialog by remember { mutableStateOf(false) }
+
+    // Auto-open the create dialog if launched with EXTRA_OPEN_CREATE
+    LaunchedEffect(Unit) {
+        if (openCreateOnLaunch) showCreateDialog = true
+    }
+
     var entryToDetail by remember { mutableStateOf<WorldEntry?>(null) }
     var entryToEdit by remember { mutableStateOf<WorldEntry?>(null) }
     var entryToDelete by remember { mutableStateOf<WorldEntry?>(null) }
 
     val view = LocalView.current
-    val blurRadiusPx = com.primaloptima.scribe.ui.theme.LocalFrostedBlurRadius.current.toInt().coerceIn(1, 25)
     val hazeState = LocalHazeState.current
     var dialogOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var dialogCaptured by remember { mutableStateOf(false) }
@@ -82,7 +88,7 @@ fun SheetsScreen(
                 dialogCaptured = true
                 val raw = BitmapBlur.captureOnly(view)
                 dialogOneShotBitmap = withContext(Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
                 }
             } else if (!anyDialogOpen) {
                 dialogCaptured = false
