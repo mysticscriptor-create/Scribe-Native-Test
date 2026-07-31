@@ -3,6 +3,8 @@ package com.primaloptima.scribe
 import android.app.Application
 import android.content.Intent
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.provider.FontRequest
+import androidx.core.provider.FontsContractCompat
 import com.primaloptima.scribe.data.AppDatabase
 import com.primaloptima.scribe.util.PrefsManager
 import com.primaloptima.scribe.util.ThemeManager
@@ -27,6 +29,46 @@ class ScribeApp : Application() {
         installCrashHandler()
         super.onCreate()
         instance = this
+        preloadGoogleFonts()
+    }
+
+    /**
+     * Kicks off background prefetch for all Google Fonts used by Scribe.
+     * Without this, fonts are fetched lazily on first use, which can cause
+     * a brief flash of the fallback system font on first launch.
+     * The handler = null means requests run on a background thread automatically.
+     */
+    private fun preloadGoogleFonts() {
+        val fonts = listOf(
+            "Playfair Display",
+            "Inter",
+            "Courier Prime",
+            "Cormorant Garamond",
+            "Caveat",
+            "Lora",
+            "JetBrains Mono"
+        )
+        val certs = resources.getStringArray(R.array.com_google_android_gms_fonts_certs_prod)
+        fonts.forEach { fontName ->
+            try {
+                val request = FontRequest(
+                    "com.google.android.gms.fonts",
+                    "com.google.android.gms",
+                    fontName,
+                    R.array.com_google_android_gms_fonts_certs
+                )
+                FontsContractCompat.requestFont(
+                    this,
+                    request,
+                    object : FontsContractCompat.FontRequestCallback() {
+                        // No-op callbacks — we just want the prefetch side-effect
+                    },
+                    null
+                )
+            } catch (_: Exception) {
+                // Font prefetch is best-effort; failures are silent
+            }
+        }
     }
 
     private fun installCrashHandler() {
