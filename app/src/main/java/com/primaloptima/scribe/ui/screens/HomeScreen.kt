@@ -302,10 +302,9 @@ fun HomeScreen(
                         Icon(
                             painter = painterResource(R.drawable.ic_launcher_foreground),
                             contentDescription = "Scribe",
-                            modifier = Modifier.size(36.dp),
+                            modifier = Modifier.size(40.dp).offset(x = (-4).dp),
                             tint = accentColor
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = "CRIBE",
                             fontSize = 22.sp,
