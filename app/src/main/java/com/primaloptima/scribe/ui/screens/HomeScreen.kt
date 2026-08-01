@@ -293,17 +293,19 @@ fun HomeScreen(
 
                 // ── HEADER: icon + wordmark + avatar + streak ──
                 Spacer(modifier = Modifier.height(28.dp))
-                // Use a Box with fillMaxWidth so we can pin wordmark to start
-                // and avatar to end — ModalDrawerSheet's internal Column centers
-                // children, but a fillMaxWidth Box defeats that.
+                // androidx.compose.foundation.layout.Box with fillMaxWidth defeats
+                // ModalDrawerSheet's internal CenterHorizontally alignment.
+                // We qualify it explicitly because foundation.* wildcard import
+                // would otherwise resolve plain "Box" to the old foundation.Box.
                 androidx.compose.foundation.layout.Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp)
                         .height(56.dp)
                 ) {
-                    // Wordmark pinned to start
-                    Box(
+                    // Wordmark pinned to start — two stacked icons share the same
+                    // 2048×922 viewport so they overlap perfectly.
+                    androidx.compose.foundation.layout.Box(
                         modifier = Modifier
                             .align(Alignment.CenterStart)
                             .height(36.dp)
