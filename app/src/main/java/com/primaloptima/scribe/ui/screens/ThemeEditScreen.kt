@@ -66,8 +66,11 @@ import com.primaloptima.scribe.util.SAFHelper
 import com.primaloptima.scribe.util.model.AppTheme
 import com.primaloptima.scribe.viewmodel.ThemeViewModel
 import java.io.File
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.input.pointer.awaitPointerEvent
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 
@@ -1256,8 +1259,12 @@ private fun ImageCropScreen(
     // Real intrinsic dimensions of the source image (bounds-only decode, no full bitmap).
     var intrinsicW by remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
     var intrinsicH by remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
+    // True once intrinsic size is known. "Use this crop" is disabled until then so the
+    // user can't save with wrong fractions computed from the placeholder 1×1 defaults.
+    var intrinsicsLoaded by remember { androidx.compose.runtime.mutableStateOf(false) }
 
     LaunchedEffect(imageUri) {
+        intrinsicsLoaded = false
         withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
                 val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -1271,6 +1278,7 @@ private fun ImageCropScreen(
                 }
             } catch (_: Exception) {}
         }
+        intrinsicsLoaded = true
     }
 
     // ── Crop box state ────────────────────────────────────────────────────────
@@ -1386,120 +1394,133 @@ private fun ImageCropScreen(
         }
 
         // ── Unified gesture handler ───────────────────────────────────────────
-        // Pinch (detectTransformGestures) and drag (detectDragGestures) MUST live in
-        // the same pointerInput block. If they are in separate Box layers, the drag
-        // detector on the top layer consumes all pointer events, so the pinch detector
-        // on the layer below never receives a second finger → pinch is completely broken.
+        // Uses a single awaitEachGesture loop. On first pointer down we decide if this
+        // is a corner/pan drag (1 finger) or a pinch (2 fingers). High-level detectors
+        // like detectDragGestures + detectTransformGestures cannot safely coexist even
+        // via concurrent launches — detectDragGestures consumes the first-down event so
+        // detectTransformGestures never sees the pointer pair it needs to start a pinch.
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(intrinsicW, intrinsicH) {
+                .pointerInput(Unit) {
                     val displayW = size.width.toFloat()
                     val displayH = size.height.toFloat()
-                    // Run both detectors concurrently in the same coroutine scope.
-                    kotlinx.coroutines.coroutineScope {
-                        // Pinch branch
-                        launch {
-                            detectTransformGestures(panZoomLock = false) { centroid, _, zoom, _ ->
-                                if (kotlin.math.abs(zoom - 1f) > 0.005f) {
-                                    val (imgX, imgY, imgW, imgH) = imageRect(displayW, displayH)
-                                    val cx = ((centroid.x - imgX) / imgW.coerceAtLeast(1f)).coerceIn(0f, 1f)
-                                    val cy = ((centroid.y - imgY) / imgH.coerceAtLeast(1f)).coerceIn(0f, 1f)
-                                    resizeBox(boxW * zoom, pivotX = cx, pivotY = cy)
-                                }
-                            }
-                        }
-                        // Drag branch
-                        launch {
                     val cornerHit = 52f
 
-                    detectDragGestures(
-                        onDragStart = { offset ->
-                            val (imgX, imgY, imgW, imgH) = imageRect(displayW, displayH)
-                            val cL = imgX + boxLeft         * imgW
-                            val cT = imgY + boxTop          * imgH
-                            val cR = imgX + (boxLeft + boxW)  * imgW
-                            val cB = imgY + (boxTop + boxH()) * imgH
+                    awaitEachGesture {
+                        // ── Wait for first finger down ────────────────────────
+                        val firstDown = awaitFirstDown(requireUnconsumed = false)
+                        firstDown.consume()
 
-                            activeCorner = when {
-                                offset.x in (cL - cornerHit)..(cL + cornerHit) && offset.y in (cT - cornerHit)..(cT + cornerHit) -> "TL"
-                                offset.x in (cR - cornerHit)..(cR + cornerHit) && offset.y in (cT - cornerHit)..(cT + cornerHit) -> "TR"
-                                offset.x in (cL - cornerHit)..(cL + cornerHit) && offset.y in (cB - cornerHit)..(cB + cornerHit) -> "BL"
-                                offset.x in (cR - cornerHit)..(cR + cornerHit) && offset.y in (cB - cornerHit)..(cB + cornerHit) -> "BR"
-                                else -> null
-                            }
-                            isDraggingBox = activeCorner == null && offset.x in cL..cR && offset.y in cT..cB
-                        },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            val (_, _, imgW, imgH) = imageRect(displayW, displayH)
-                            // Convert pixel drag to image-fraction delta.
-                            val dx = dragAmount.x / imgW.coerceAtLeast(1f)
-                            val dy = dragAmount.y / imgH.coerceAtLeast(1f)
+                        val startOffset = firstDown.position
+                        val (imgX0, imgY0, imgW0, imgH0) = imageRect(displayW, displayH)
+                        val cL0 = imgX0 + boxLeft         * imgW0
+                        val cT0 = imgY0 + boxTop          * imgH0
+                        val cR0 = imgX0 + (boxLeft + boxW)  * imgW0
+                        val cB0 = imgY0 + (boxTop + boxH()) * imgH0
 
-                            when (val corner = activeCorner) {
-                                // Each corner: compute new boxW from the drag direction that
-                                // grows/shrinks the box, then reposition so the OPPOSITE corner
-                                // stays fixed. Height is always derived from width.
-                                "BR" -> {
-                                    // Right and bottom move → grow/shrink from top-left anchor.
-                                    // Clamp width so BOTH right edge (boxLeft+newW ≤ 1) and
-                                    // bottom edge (boxTop+newH ≤ 1) stay inside the image.
-                                    val maxWbyRight  = (1f - boxLeft).coerceAtLeast(0.05f)
-                                    // Max W such that derived H fits: newH = newW/aspect ≤ 1-boxTop
-                                    val maxWbyBottom = ((1f - boxTop) * screenAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.05f)
-                                    val newW = (boxW + dx).coerceIn(0.05f, minOf(maxWbyRight, maxWbyBottom))
-                                    boxW = newW
-                                }
-                                "BL" -> {
-                                    // Left moves → shrink/grow from right anchor.
-                                    val rightEdge    = boxLeft + boxW
-                                    val maxWbyLeft   = rightEdge.coerceAtLeast(0.05f)
-                                    val maxWbyBottom = ((1f - boxTop) * screenAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.05f)
-                                    val newW = (boxW - dx).coerceIn(0.05f, minOf(maxWbyLeft, maxWbyBottom))
-                                    boxW    = newW
-                                    boxLeft = (rightEdge - newW).coerceIn(0f, maxOf(0f, 1f - newW))
-                                }
-                                "TR" -> {
-                                    // Right moves → grow/shrink; top shifts to keep bottom fixed.
-                                    val bottomEdge   = boxTop + boxH()
-                                    val maxWbyRight  = (1f - boxLeft).coerceAtLeast(0.05f)
-                                    // Max W such that newTop = bottomEdge - newH ≥ 0
-                                    val maxWbyTop    = (bottomEdge * screenAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.05f)
-                                    val newW = (boxW + dx).coerceIn(0.05f, minOf(maxWbyRight, maxWbyTop))
-                                    val newH = (newW / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.01f, 1f)
-                                    val newTop = (bottomEdge - newH).coerceIn(0f, maxOf(0f, 1f - newH))
-                                    boxW   = newW
-                                    boxTop = newTop
-                                }
-                                "TL" -> {
-                                    // Left moves → shrink/grow; both top and left shift to keep bottom-right fixed.
-                                    val rightEdge  = boxLeft + boxW
-                                    val bottomEdge = boxTop  + boxH()
-                                    val maxWbyLeft = rightEdge.coerceAtLeast(0.05f)
-                                    val maxWbyTop  = (bottomEdge * screenAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.05f)
-                                    val newW = (boxW - dx).coerceIn(0.05f, minOf(maxWbyLeft, maxWbyTop))
-                                    val newH = (newW / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.01f, 1f)
-                                    val newLeft = (rightEdge  - newW).coerceIn(0f, maxOf(0f, 1f - newW))
-                                    val newTop  = (bottomEdge - newH).coerceIn(0f, maxOf(0f, 1f - newH))
-                                    boxW    = newW
-                                    boxLeft = newLeft
-                                    boxTop  = newTop
-                                }
-                                null -> if (isDraggingBox) {
-                                    // Pan — keep box fully inside image.
-                                    boxLeft = (boxLeft + dx).coerceIn(0f, maxOf(0f, 1f - boxW))
-                                    boxTop  = (boxTop  + dy).coerceIn(0f, maxOf(0f, 1f - boxH()))
-                                }
-                            }
-                        },
-                        onDragEnd = {
-                            isDraggingBox = false
-                            activeCorner  = null
+                        // Classify the touch immediately on first down.
+                        val corner = when {
+                            startOffset.x in (cL0-cornerHit)..(cL0+cornerHit) && startOffset.y in (cT0-cornerHit)..(cT0+cornerHit) -> "TL"
+                            startOffset.x in (cR0-cornerHit)..(cR0+cornerHit) && startOffset.y in (cT0-cornerHit)..(cT0+cornerHit) -> "TR"
+                            startOffset.x in (cL0-cornerHit)..(cL0+cornerHit) && startOffset.y in (cB0-cornerHit)..(cB0+cornerHit) -> "BL"
+                            startOffset.x in (cR0-cornerHit)..(cR0+cornerHit) && startOffset.y in (cB0-cornerHit)..(cB0+cornerHit) -> "BR"
+                            else -> null
                         }
-                    )
-                        } // end drag launch
-                    } // end coroutineScope
+                        val panHit = corner == null &&
+                                startOffset.x in cL0..cR0 && startOffset.y in cT0..cB0
+
+                        // Track previous centroid / span for incremental pinch math.
+                        var prevCentroid = startOffset
+                        var prevSpan     = 0f
+
+                        // ── Event loop ────────────────────────────────────────
+                        do {
+                            val event = awaitPointerEvent()
+                            val pointers = event.changes.filter { it.pressed }
+
+                            if (pointers.size >= 2) {
+                                // ── Pinch ─────────────────────────────────────
+                                val p1 = pointers[0].position
+                                val p2 = pointers[1].position
+                                val centroid = androidx.compose.ui.geometry.Offset(
+                                    (p1.x + p2.x) / 2f, (p1.y + p2.y) / 2f
+                                )
+                                val span = kotlin.math.sqrt(
+                                    ((p2.x - p1.x) * (p2.x - p1.x) +
+                                     (p2.y - p1.y) * (p2.y - p1.y)).toDouble()
+                                ).toFloat()
+
+                                if (prevSpan > 0f) {
+                                    val zoom = (span / prevSpan.coerceAtLeast(1f))
+                                        .coerceIn(0.5f, 2f) // sanity-clamp per frame
+                                    if (kotlin.math.abs(zoom - 1f) > 0.001f) {
+                                        val (imgX, imgY, imgW, imgH) = imageRect(displayW, displayH)
+                                        val cx = ((centroid.x - imgX) / imgW.coerceAtLeast(1f)).coerceIn(0f, 1f)
+                                        val cy = ((centroid.y - imgY) / imgH.coerceAtLeast(1f)).coerceIn(0f, 1f)
+                                        resizeBox(boxW * zoom, pivotX = cx, pivotY = cy)
+                                    }
+                                }
+                                prevSpan     = span
+                                prevCentroid = centroid
+                                event.changes.forEach { it.consume() }
+
+                            } else if (pointers.size == 1) {
+                                // ── Single-finger drag ─────────────────────────
+                                val change = pointers[0]
+                                val drag = change.position - change.previousPosition
+                                val (_, _, imgW, imgH) = imageRect(displayW, displayH)
+                                val dx = drag.x / imgW.coerceAtLeast(1f)
+                                val dy = drag.y / imgH.coerceAtLeast(1f)
+
+                                when (corner) {
+                                    "BR" -> {
+                                        val maxWbyRight  = (1f - boxLeft).coerceAtLeast(0.05f)
+                                        val maxWbyBottom = ((1f - boxTop) * screenAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.05f)
+                                        boxW = (boxW + dx).coerceIn(0.05f, minOf(maxWbyRight, maxWbyBottom))
+                                    }
+                                    "BL" -> {
+                                        val rightEdge    = boxLeft + boxW
+                                        val maxWbyLeft   = rightEdge.coerceAtLeast(0.05f)
+                                        val maxWbyBottom = ((1f - boxTop) * screenAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.05f)
+                                        val newW = (boxW - dx).coerceIn(0.05f, minOf(maxWbyLeft, maxWbyBottom))
+                                        boxW    = newW
+                                        boxLeft = (rightEdge - newW).coerceIn(0f, maxOf(0f, 1f - newW))
+                                    }
+                                    "TR" -> {
+                                        val bottomEdge  = boxTop + boxH()
+                                        val maxWbyRight = (1f - boxLeft).coerceAtLeast(0.05f)
+                                        val maxWbyTop   = (bottomEdge * screenAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.05f)
+                                        val newW = (boxW + dx).coerceIn(0.05f, minOf(maxWbyRight, maxWbyTop))
+                                        val newH = (newW / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.01f, 1f)
+                                        boxW   = newW
+                                        boxTop = (bottomEdge - newH).coerceIn(0f, maxOf(0f, 1f - newH))
+                                    }
+                                    "TL" -> {
+                                        val rightEdge  = boxLeft + boxW
+                                        val bottomEdge = boxTop  + boxH()
+                                        val maxWbyLeft = rightEdge.coerceAtLeast(0.05f)
+                                        val maxWbyTop  = (bottomEdge * screenAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.05f)
+                                        val newW = (boxW - dx).coerceIn(0.05f, minOf(maxWbyLeft, maxWbyTop))
+                                        val newH = (newW / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.01f, 1f)
+                                        boxLeft = (rightEdge  - newW).coerceIn(0f, maxOf(0f, 1f - newW))
+                                        boxTop  = (bottomEdge - newH).coerceIn(0f, maxOf(0f, 1f - newH))
+                                        boxW    = newW
+                                    }
+                                    null -> if (panHit) {
+                                        boxLeft = (boxLeft + dx).coerceIn(0f, maxOf(0f, 1f - boxW))
+                                        boxTop  = (boxTop  + dy).coerceIn(0f, maxOf(0f, 1f - boxH()))
+                                    }
+                                }
+                                change.consume()
+                                prevSpan = 0f // reset span so next 2-finger event starts fresh
+                            }
+                        } while (event.changes.any { it.pressed })
+
+                        // Gesture ended — reset state.
+                        activeCorner  = null
+                        isDraggingBox = false
+                    }
                 }
         )
 
@@ -1551,25 +1572,36 @@ private fun ImageCropScreen(
                             val result = withContext(kotlinx.coroutines.Dispatchers.IO) {
                                 try {
                                     val src = android.net.Uri.parse(imageUri)
-                                    // Always open a fresh stream — never reuse a closed one.
-                                    val full = (if (src.scheme == "file")
-                                        java.io.File(src.path!!).inputStream()
-                                    else
-                                        context.contentResolver.openInputStream(src)
-                                    )?.use { stream ->
-                                        android.graphics.BitmapFactory.decodeStream(stream)
-                                    } ?: return@withContext null
+
+                                    // Decode full bitmap. For file:// URIs use a direct stream;
+                                    // for content:// URIs use ContentResolver (may return null on
+                                    // permission loss — we handle that explicitly below).
+                                    val full: android.graphics.Bitmap? = if (src.scheme == "file") {
+                                        val f = java.io.File(src.path!!)
+                                        if (!f.exists()) {
+                                            null
+                                        } else {
+                                            f.inputStream().use { android.graphics.BitmapFactory.decodeStream(it) }
+                                        }
+                                    } else {
+                                        context.contentResolver.openInputStream(src)?.use {
+                                            android.graphics.BitmapFactory.decodeStream(it)
+                                        }
+                                    }
+
+                                    if (full == null) {
+                                        return@withContext null
+                                    }
 
                                     val fw = full.width.toFloat()
                                     val fh = full.height.toFloat()
 
-                                    // boxLeft/boxTop/boxW/boxH are fractions of the DISPLAYED image
-                                    // rect (after ContentScale.Fit letterboxing). Since Fit maps the
-                                    // full bitmap 1:1 in fraction space, multiply by fw/fh for pixels.
+                                    // Fractions → pixel coordinates, clamped so we never
+                                    // request a rect that exceeds the bitmap bounds.
                                     val bx = (boxLeft * fw).toInt().coerceIn(0, full.width - 1)
                                     val by = (boxTop  * fh).toInt().coerceIn(0, full.height - 1)
-                                    val bw = (boxW   * fw).toInt().coerceIn(1, full.width  - bx)
-                                    val bh = (boxH() * fh).toInt().coerceIn(1, full.height - by)
+                                    val bw = (boxW    * fw).toInt().coerceIn(1, full.width  - bx)
+                                    val bh = (boxH()  * fh).toInt().coerceIn(1, full.height - by)
 
                                     val cropped = android.graphics.Bitmap.createBitmap(full, bx, by, bw, bh)
                                     full.recycle()
@@ -1586,31 +1618,37 @@ private fun ImageCropScreen(
                                         scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, out)
                                     }
                                     scaled.recycle()
-                                    android.net.Uri.fromFile(dest).toString()
+                                    val resultUri = android.net.Uri.fromFile(dest).toString()
+                                    resultUri
                                 } catch (e: Exception) {
-                                    android.util.Log.e("ImageCrop", "Crop failed", e)
-                                    null
+                                    "ERROR:${e.javaClass.simpleName}: ${e.message}"
                                 }
                             }
                             isSaving = false
-                            if (result != null) {
+                            if (result != null && !result.startsWith("ERROR:")) {
                                 onConfirm(result)
                             } else {
-                                // Show error — don't silently fall back to original URI,
-                                // which causes a flash and no visible change for the user.
+                                // Show the actual error so the user can report it.
+                                val msg = if (result != null) result.removePrefix("ERROR:") else "decodeStream returned null"
                                 android.widget.Toast.makeText(
-                                    context, "Failed to save crop", android.widget.Toast.LENGTH_SHORT
+                                    context, "Crop failed: $msg", android.widget.Toast.LENGTH_LONG
                                 ).show()
                             }
                         }
                     }
                 },
-                enabled = !isSaving
+                // Disabled until intrinsics are loaded (prevents wrong crop on same-aspect
+                // images where the box hasn't settled yet) and while a save is in progress.
+                enabled = !isSaving && intrinsicsLoaded
             ) {
                 if (isSaving) {
                     CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
                     Spacer(Modifier.width(8.dp))
                     Text("Saving...")
+                } else if (!intrinsicsLoaded) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Loading...")
                 } else {
                     Icon(Icons.Default.Check, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
