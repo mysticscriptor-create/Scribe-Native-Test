@@ -293,21 +293,19 @@ fun HomeScreen(
 
                 // ── HEADER: icon + wordmark + avatar + streak ──
                 Spacer(modifier = Modifier.height(28.dp))
-                // androidx.compose.foundation.layout.Box with fillMaxWidth defeats
-                // ModalDrawerSheet's internal CenterHorizontally alignment.
-                // We qualify it explicitly because foundation.* wildcard import
-                // would otherwise resolve plain "Box" to the old foundation.Box.
-                androidx.compose.foundation.layout.Box(
+                // Row with fillMaxWidth reliably pins logo to start and avatar+streak
+                // to end inside ModalDrawerSheet, regardless of its internal Column alignment.
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp)
-                        .height(56.dp)
+                        .padding(horizontal = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    // Wordmark pinned to start — two stacked icons share the same
-                    // 2048×922 viewport so they overlap perfectly.
-                    androidx.compose.foundation.layout.Box(
+                    // Wordmark — two Icons share the same viewport so they overlap perfectly,
+                    // letting ic_scribe_s (the coloured S+quill) sit on top of ic_scribe_text.
+                    Box(
                         modifier = Modifier
-                            .align(Alignment.CenterStart)
                             .height(36.dp)
                             .width(160.dp)
                     ) {
@@ -326,7 +324,6 @@ fun HomeScreen(
                     }
                     // Avatar + streak pinned to end
                     Column(
-                        modifier = Modifier.align(Alignment.CenterEnd),
                         horizontalAlignment = Alignment.End
                     ) {
                         Box(
