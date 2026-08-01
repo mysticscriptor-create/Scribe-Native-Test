@@ -282,6 +282,10 @@ fun HomeScreen(
                     .fillMaxWidth(0.78f)
                     .frostedPanel(hazeState)
             ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.Start
+                ) {
                 val drawerTheme = LocalAppTheme.current
                 val accentColor = drawerTheme?.let {
                     parseComposeColor(it.colors.accent, MaterialTheme.colorScheme.primary)
@@ -434,8 +438,7 @@ fun HomeScreen(
                         )
                     }
                 }
-            }
-            } // end CompositionLocalProvider(LocalOneShotBitmap provides oneShotBitmap)
+                } // end CompositionLocalProvider(LocalOneShotBitmap provides oneShotBitmap)
         }
     ) {
         Scaffold(
