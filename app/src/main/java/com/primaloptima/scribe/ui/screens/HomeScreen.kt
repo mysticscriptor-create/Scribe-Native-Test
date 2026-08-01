@@ -282,10 +282,6 @@ fun HomeScreen(
                     .fillMaxWidth(0.78f)
                     .frostedPanel(hazeState)
             ) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.Start
-                ) {
                 val drawerTheme = LocalAppTheme.current
                 val accentColor = drawerTheme?.let {
                     parseComposeColor(it.colors.accent, MaterialTheme.colorScheme.primary)
@@ -301,7 +297,8 @@ fun HomeScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Start
                 ) {
                     // Wordmark: two drawables layered in a Box so each can be tinted
                     // at runtime from LocalAppTheme — fully theme-aware.
@@ -438,7 +435,8 @@ fun HomeScreen(
                         )
                     }
                 }
-                } // end CompositionLocalProvider(LocalOneShotBitmap provides oneShotBitmap)
+            }
+            } // end CompositionLocalProvider(LocalOneShotBitmap provides oneShotBitmap)
         }
     ) {
         Scaffold(
