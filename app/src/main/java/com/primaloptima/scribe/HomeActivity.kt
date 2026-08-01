@@ -20,12 +20,13 @@ class HomeActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
 
-        // ── Pick the splash style that matches the saved theme ────────────────
-        // Must happen before installSplashScreen() so the SplashScreen compat
-        // library reads the correct windowSplashScreenBackground and
-        // windowSplashScreenAnimatedIconForegroundColor attributes.
+        // ── Set the splash theme BEFORE installSplashScreen() ─────────────────
+        // setTheme() here overrides the theme declared in AndroidManifest.xml
+        // for this activity. installSplashScreen() reads windowSplashScreenBackground
+        // and windowSplashScreenAnimatedIcon from whichever theme is active at
+        // the moment it is called, so this must come first.
         val prefs = PrefsManager(this)
-        setSplashScreenTheme(splashStyleFor(prefs.activeThemeId))
+        setTheme(splashStyleFor(prefs.activeThemeId))
 
         val splashScreen = installSplashScreen()
         enableEdgeToEdge()
@@ -72,11 +73,9 @@ class HomeActivity : ComponentActivity() {
     }
 
     /**
-     * Maps a theme ID to the pre-defined splash style for that theme.
-     * Built-in themes each have their own style with exact bg + icon colors.
-     * Custom themes fall back to Theme.Scribe.Splash.Custom whose color
-     * resources are written to colors_splash.xml at theme-save time via
-     * PrefsManager.saveSplashColors() — see PrefsManager for details.
+     * Maps a saved theme ID to the matching pre-defined splash style.
+     * Each style lives in res/values/scribe_splash_dynamic_theme.xml (API < 31)
+     * and res/values-v31/scribe_splash_dynamic_theme.xml (API 31+ adds icon color).
      */
     private fun splashStyleFor(themeId: String): Int = when (themeId) {
         "obsidian"   -> R.style.Theme_Scribe_Splash_Obsidian
