@@ -77,6 +77,7 @@ fun SheetsScreen(
     var entryToDelete by remember { mutableStateOf<WorldEntry?>(null) }
 
     val view = LocalView.current
+    val blurRadiusPx = com.primaloptima.scribe.ui.theme.LocalFrostedBlurRadius.current.toInt().coerceIn(1, 25)
     val hazeState = LocalHazeState.current
     var dialogOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var dialogCaptured by remember { mutableStateOf(false) }
@@ -88,7 +89,7 @@ fun SheetsScreen(
                 dialogCaptured = true
                 val raw = BitmapBlur.captureOnly(view)
                 dialogOneShotBitmap = withContext(Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
                 }
             } else if (!anyDialogOpen) {
                 dialogCaptured = false
