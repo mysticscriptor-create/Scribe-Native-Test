@@ -96,6 +96,7 @@ fun HomeScreen(
 
     // One-shot blurred capture for pre-API-31 frosted glass on the left drawer
     val view = LocalView.current
+    val blurRadiusPx = com.primaloptima.scribe.ui.theme.LocalFrostedBlurRadius.current.toInt().coerceIn(1, 25)
     var oneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var captured by remember { mutableStateOf(false) }
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
@@ -104,9 +105,11 @@ fun HomeScreen(
                 captured = true
                 val raw = BitmapBlur.captureOnly(view)  // must stay on Main thread
                 oneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
                 }
-            } else if (drawerState.currentValue == DrawerValue.Closed) {
+            } else if (drawerState.currentValue == DrawerValue.Closed &&
+                       drawerState.targetValue == DrawerValue.Closed) {
+                // Only clear when fully settled — not mid close-animation
                 captured = false
                 oneShotBitmap = null
             }
@@ -123,9 +126,11 @@ fun HomeScreen(
                 rightCaptured = true
                 val raw = BitmapBlur.captureOnly(view)
                 rightOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
                 }
             } else if (!rightPanelVisible) {
+                // Wait for the 200ms slide-out animation before clearing
+                kotlinx.coroutines.delay(250)
                 rightCaptured = false
                 rightOneShotBitmap = null
             }
@@ -219,7 +224,7 @@ fun HomeScreen(
             // scope.launch / LaunchedEffect both run on Main by default, so this is safe.
             val raw = BitmapBlur.captureOnly(view)
             dialogOneShotBitmap = withContext(Dispatchers.IO) {
-                raw?.let { BitmapBlur.blurBitmap(it, radius = 15) }
+                raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
             }
         }
         openDialog()   // NOW set the flag — dialog renders with bitmap already in place
@@ -300,9 +305,8 @@ fun HomeScreen(
                     // ic_scribe_s    = S + quill overlay (accentColor)
                     Box(
                         modifier = Modifier
-                            .weight(1f)
                             .height(36.dp)
-                            .wrapContentWidth(Alignment.Start)
+                            .width(160.dp)  // fixed width matching the wordmark asset
                     ) {
                         Icon(
                             painter = painterResource(R.drawable.ic_scribe_text),
@@ -317,6 +321,7 @@ fun HomeScreen(
                             modifier = Modifier.fillMaxSize()
                         )
                     }
+                    Spacer(modifier = Modifier.weight(1f))
                     // Avatar + streak pill (right-aligned column)
                     Column(horizontalAlignment = Alignment.End) {
                         // Circular avatar placeholder
@@ -679,7 +684,7 @@ fun HomeScreen(
                                         tonalElevation = 0.dp,
                                         modifier = Modifier
                                             .width(200.dp)
-                                            .frostedFab(LocalHazeState.current)
+                                            .frostedFab(LocalHazeState.current, shape = RoundedCornerShape(20.dp))
                                     ) {
                                         Column {
                                             // Item 1 — New Book
@@ -767,7 +772,7 @@ fun HomeScreen(
                                         containerColor = frostedContainerColor(fallback = accentClr),
                                         contentColor = Color.White,
                                         shape = RoundedCornerShape(16.dp),
-                                        modifier = Modifier.frostedFab(LocalHazeState.current)
+                                        modifier = Modifier.frostedFab(LocalHazeState.current, shape = RoundedCornerShape(16.dp))
                                     ) {
                                         Icon(Icons.Default.Add, contentDescription = "New Book")
                                     }
@@ -789,7 +794,7 @@ fun HomeScreen(
                             containerColor = frostedContainerColor(fallback = accentClr),
                             contentColor = Color.White,
                             shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.frostedFab(LocalHazeState.current)
+                            modifier = Modifier.frostedFab(LocalHazeState.current, shape = RoundedCornerShape(16.dp))
                         )
                         else -> Box(Modifier)
                     }
