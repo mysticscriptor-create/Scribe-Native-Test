@@ -1248,9 +1248,10 @@ private fun ImageCropScreen(
     val view = androidx.compose.ui.platform.LocalView.current
 
     // Screen pixel dimensions — used to lock crop aspect ratio and scale the saved bitmap.
+    // The app is edge-to-edge so displayMetrics gives the true full-screen size.
     val screenW = remember(view) { view.resources.displayMetrics.widthPixels.toFloat() }
-    val screenH = remember(view) { view.resources.displayMetrics.heightPixels.toFloat() }
-    val screenAspect = screenW / screenH.coerceAtLeast(1f)
+    val screenH = remember(view) { view.resources.displayMetrics.heightPixels.toFloat().coerceAtLeast(1f) }
+    val screenAspect = screenW / screenH
 
     // Real intrinsic dimensions of the source image (bounds-only decode, no full bitmap).
     var intrinsicW by remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
@@ -1303,8 +1304,8 @@ private fun ImageCropScreen(
         val newH = (clampedW / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.01f, 1f)
         val oldH = boxH()
         // Shift left/top so the pivot point stays fixed.
-        val newLeft = (boxLeft + (boxW - clampedW) * pivotX).coerceIn(0f, (1f - clampedW).coerceAtLeast(0f))
-        val newTop  = (boxTop  + (oldH  - newH)    * pivotY).coerceIn(0f, (1f - newH).coerceAtLeast(0f))
+        val newLeft = (boxLeft + (boxW - clampedW) * pivotX).coerceIn(0f, maxOf(0f, 1f - clampedW))
+        val newTop  = (boxTop  + (oldH  - newH)    * pivotY).coerceIn(0f, maxOf(0f, 1f - newH))
         boxW    = clampedW
         boxLeft = newLeft
         boxTop  = newTop
@@ -1384,35 +1385,33 @@ private fun ImageCropScreen(
             drawLine(grid, androidx.compose.ui.geometry.Offset(cL, cT + thirdH * 2), androidx.compose.ui.geometry.Offset(cR, cT + thirdH * 2), 1f)
         }
 
-        // ── Pinch-to-zoom handler ─────────────────────────────────────────────
-        // Uses detectTransformGestures — centroid-anchored zoom, aspect ratio locked.
+        // ── Unified gesture handler ───────────────────────────────────────────
+        // Pinch (detectTransformGestures) and drag (detectDragGestures) MUST live in
+        // the same pointerInput block. If they are in separate Box layers, the drag
+        // detector on the top layer consumes all pointer events, so the pinch detector
+        // on the layer below never receives a second finger → pinch is completely broken.
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(intrinsicW, intrinsicH) {
                     val displayW = size.width.toFloat()
                     val displayH = size.height.toFloat()
-                    detectTransformGestures(panZoomLock = false) { centroid, pan, zoom, _ ->
-                        if (kotlin.math.abs(zoom - 1f) > 0.005f) {
-                            // Pinch detected — resize box anchored to centroid.
-                            val (imgX, imgY, imgW, imgH) = imageRect(displayW, displayH)
-                            // Convert centroid to fraction within image rect.
-                            val cx = ((centroid.x - imgX) / imgW.coerceAtLeast(1f)).coerceIn(0f, 1f)
-                            val cy = ((centroid.y - imgY) / imgH.coerceAtLeast(1f)).coerceIn(0f, 1f)
-                            resizeBox(boxW * zoom, pivotX = cx, pivotY = cy)
+                    // Run both detectors concurrently in the same coroutine scope.
+                    kotlinx.coroutines.coroutineScope {
+                        // Pinch branch
+                        launch {
+                            detectTransformGestures(panZoomLock = false) { centroid, _, zoom, _ ->
+                                if (kotlin.math.abs(zoom - 1f) > 0.005f) {
+                                    val (imgX, imgY, imgW, imgH) = imageRect(displayW, displayH)
+                                    val cx = ((centroid.x - imgX) / imgW.coerceAtLeast(1f)).coerceIn(0f, 1f)
+                                    val cy = ((centroid.y - imgY) / imgH.coerceAtLeast(1f)).coerceIn(0f, 1f)
+                                    resizeBox(boxW * zoom, pivotX = cx, pivotY = cy)
+                                }
+                            }
                         }
-                    }
-                }
-        )
-
-        // ── Drag handler (pan box + corner resize) ────────────────────────────
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(intrinsicW, intrinsicH) {
-                    val displayW = size.width.toFloat()
-                    val displayH = size.height.toFloat()
-                    val cornerHit = 52f // touch radius for corner hit-test in px
+                        // Drag branch
+                        launch {
+                    val cornerHit = 52f
 
                     detectDragGestures(
                         onDragStart = { offset ->
@@ -1422,7 +1421,6 @@ private fun ImageCropScreen(
                             val cR = imgX + (boxLeft + boxW)  * imgW
                             val cB = imgY + (boxTop + boxH()) * imgH
 
-                            // Hit-test corners first.
                             activeCorner = when {
                                 offset.x in (cL - cornerHit)..(cL + cornerHit) && offset.y in (cT - cornerHit)..(cT + cornerHit) -> "TL"
                                 offset.x in (cR - cornerHit)..(cR + cornerHit) && offset.y in (cT - cornerHit)..(cT + cornerHit) -> "TR"
@@ -1430,7 +1428,6 @@ private fun ImageCropScreen(
                                 offset.x in (cR - cornerHit)..(cR + cornerHit) && offset.y in (cB - cornerHit)..(cB + cornerHit) -> "BR"
                                 else -> null
                             }
-                            // If not a corner, pan if inside box.
                             isDraggingBox = activeCorner == null && offset.x in cL..cR && offset.y in cT..cB
                         },
                         onDrag = { change, dragAmount ->
@@ -1446,26 +1443,32 @@ private fun ImageCropScreen(
                                 // stays fixed. Height is always derived from width.
                                 "BR" -> {
                                     // Right and bottom move → grow/shrink from top-left anchor.
-                                    val newW = (boxW + dx).coerceIn(0.05f, (1f - boxLeft).coerceAtLeast(0.05f))
-                                    val newH = (newW / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.01f, 1f)
-                                    if (boxTop + newH <= 1f) boxW = newW
+                                    // Clamp width so BOTH right edge (boxLeft+newW ≤ 1) and
+                                    // bottom edge (boxTop+newH ≤ 1) stay inside the image.
+                                    val maxWbyRight  = (1f - boxLeft).coerceAtLeast(0.05f)
+                                    // Max W such that derived H fits: newH = newW/aspect ≤ 1-boxTop
+                                    val maxWbyBottom = ((1f - boxTop) * screenAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.05f)
+                                    val newW = (boxW + dx).coerceIn(0.05f, minOf(maxWbyRight, maxWbyBottom))
+                                    boxW = newW
                                 }
                                 "BL" -> {
                                     // Left moves → shrink/grow from right anchor.
-                                    val rightEdge = boxLeft + boxW
-                                    val newW = (boxW - dx).coerceIn(0.05f, rightEdge.coerceAtLeast(0.05f))
-                                    val newH = (newW / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.01f, 1f)
-                                    if (boxTop + newH <= 1f) {
-                                        boxW    = newW
-                                        boxLeft = (rightEdge - newW).coerceIn(0f, 1f - newW)
-                                    }
+                                    val rightEdge    = boxLeft + boxW
+                                    val maxWbyLeft   = rightEdge.coerceAtLeast(0.05f)
+                                    val maxWbyBottom = ((1f - boxTop) * screenAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.05f)
+                                    val newW = (boxW - dx).coerceIn(0.05f, minOf(maxWbyLeft, maxWbyBottom))
+                                    boxW    = newW
+                                    boxLeft = (rightEdge - newW).coerceIn(0f, maxOf(0f, 1f - newW))
                                 }
                                 "TR" -> {
-                                    // Right moves → grow/shrink; top anchor shifts to keep bottom fixed.
-                                    val bottomEdge = boxTop + boxH()
-                                    val newW = (boxW + dx).coerceIn(0.05f, (1f - boxLeft).coerceAtLeast(0.05f))
+                                    // Right moves → grow/shrink; top shifts to keep bottom fixed.
+                                    val bottomEdge   = boxTop + boxH()
+                                    val maxWbyRight  = (1f - boxLeft).coerceAtLeast(0.05f)
+                                    // Max W such that newTop = bottomEdge - newH ≥ 0
+                                    val maxWbyTop    = (bottomEdge * screenAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.05f)
+                                    val newW = (boxW + dx).coerceIn(0.05f, minOf(maxWbyRight, maxWbyTop))
                                     val newH = (newW / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.01f, 1f)
-                                    val newTop = (bottomEdge - newH).coerceIn(0f, (1f - newH).coerceAtLeast(0f))
+                                    val newTop = (bottomEdge - newH).coerceIn(0f, maxOf(0f, 1f - newH))
                                     boxW   = newW
                                     boxTop = newTop
                                 }
@@ -1473,18 +1476,20 @@ private fun ImageCropScreen(
                                     // Left moves → shrink/grow; both top and left shift to keep bottom-right fixed.
                                     val rightEdge  = boxLeft + boxW
                                     val bottomEdge = boxTop  + boxH()
-                                    val newW = (boxW - dx).coerceIn(0.05f, rightEdge.coerceAtLeast(0.05f))
+                                    val maxWbyLeft = rightEdge.coerceAtLeast(0.05f)
+                                    val maxWbyTop  = (bottomEdge * screenAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.05f)
+                                    val newW = (boxW - dx).coerceIn(0.05f, minOf(maxWbyLeft, maxWbyTop))
                                     val newH = (newW / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.01f, 1f)
-                                    val newLeft = (rightEdge  - newW).coerceIn(0f, (1f - newW).coerceAtLeast(0f))
-                                    val newTop  = (bottomEdge - newH).coerceIn(0f, (1f - newH).coerceAtLeast(0f))
+                                    val newLeft = (rightEdge  - newW).coerceIn(0f, maxOf(0f, 1f - newW))
+                                    val newTop  = (bottomEdge - newH).coerceIn(0f, maxOf(0f, 1f - newH))
                                     boxW    = newW
                                     boxLeft = newLeft
                                     boxTop  = newTop
                                 }
                                 null -> if (isDraggingBox) {
                                     // Pan — keep box fully inside image.
-                                    boxLeft = (boxLeft + dx).coerceIn(0f, (1f - boxW).coerceAtLeast(0f))
-                                    boxTop  = (boxTop  + dy).coerceIn(0f, (1f - boxH()).coerceAtLeast(0f))
+                                    boxLeft = (boxLeft + dx).coerceIn(0f, maxOf(0f, 1f - boxW))
+                                    boxTop  = (boxTop  + dy).coerceIn(0f, maxOf(0f, 1f - boxH()))
                                 }
                             }
                         },
@@ -1493,6 +1498,8 @@ private fun ImageCropScreen(
                             activeCorner  = null
                         }
                     )
+                        } // end drag launch
+                    } // end coroutineScope
                 }
         )
 
@@ -1544,23 +1551,25 @@ private fun ImageCropScreen(
                             val result = withContext(kotlinx.coroutines.Dispatchers.IO) {
                                 try {
                                     val src = android.net.Uri.parse(imageUri)
-                                    val inputStream = if (src.scheme == "file") java.io.File(src.path!!).inputStream()
-                                                      else context.contentResolver.openInputStream(src)!!
-                                    val full = android.graphics.BitmapFactory.decodeStream(inputStream)
-                                        ?: return@withContext null
-                                    inputStream.close()
+                                    // Always open a fresh stream — never reuse a closed one.
+                                    val full = (if (src.scheme == "file")
+                                        java.io.File(src.path!!).inputStream()
+                                    else
+                                        context.contentResolver.openInputStream(src)
+                                    )?.use { stream ->
+                                        android.graphics.BitmapFactory.decodeStream(stream)
+                                    } ?: return@withContext null
 
                                     val fw = full.width.toFloat()
                                     val fh = full.height.toFloat()
 
                                     // boxLeft/boxTop/boxW/boxH are fractions of the DISPLAYED image
-                                    // rect, not the full canvas. But since ContentScale.Fit maps the
-                                    // full bitmap into the displayed rect 1:1 in fraction space,
-                                    // multiplying directly by fw/fh gives correct pixel coordinates.
-                                    val bx = (boxLeft   * fw).toInt().coerceIn(0, full.width - 1)
-                                    val by = (boxTop    * fh).toInt().coerceIn(0, full.height - 1)
-                                    val bw = (boxW      * fw).toInt().coerceIn(1, full.width  - bx)
-                                    val bh = (boxH()    * fh).toInt().coerceIn(1, full.height - by)
+                                    // rect (after ContentScale.Fit letterboxing). Since Fit maps the
+                                    // full bitmap 1:1 in fraction space, multiply by fw/fh for pixels.
+                                    val bx = (boxLeft * fw).toInt().coerceIn(0, full.width - 1)
+                                    val by = (boxTop  * fh).toInt().coerceIn(0, full.height - 1)
+                                    val bw = (boxW   * fw).toInt().coerceIn(1, full.width  - bx)
+                                    val bh = (boxH() * fh).toInt().coerceIn(1, full.height - by)
 
                                     val cropped = android.graphics.Bitmap.createBitmap(full, bx, by, bw, bh)
                                     full.recycle()
@@ -1584,7 +1593,15 @@ private fun ImageCropScreen(
                                 }
                             }
                             isSaving = false
-                            if (result != null) onConfirm(result) else onConfirm(imageUri)
+                            if (result != null) {
+                                onConfirm(result)
+                            } else {
+                                // Show error — don't silently fall back to original URI,
+                                // which causes a flash and no visible change for the user.
+                                android.widget.Toast.makeText(
+                                    context, "Failed to save crop", android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
                         }
                     }
                 },
