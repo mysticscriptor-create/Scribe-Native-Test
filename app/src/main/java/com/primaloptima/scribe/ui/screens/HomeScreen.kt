@@ -294,17 +294,29 @@ fun HomeScreen(
                         .padding(horizontal = 20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Wordmark: single two-color vector (S+quill in accent, CRIBE in onSurface)
-                    // tint = Color.Unspecified is required so per-path colors are respected
-                    Icon(
-                        painter = painterResource(R.drawable.ic_scribe_wordmark),
-                        contentDescription = "Scribe",
-                        tint = Color.Unspecified,
+                    // Wordmark: two drawables layered in a Box so each can be tinted
+                    // at runtime from LocalAppTheme — fully theme-aware.
+                    // ic_scribe_text = CRIBE letters (adaptiveTextColor)
+                    // ic_scribe_s    = S + quill overlay (accentColor)
+                    Box(
                         modifier = Modifier
                             .weight(1f)
                             .height(36.dp)
                             .wrapContentWidth(Alignment.Start)
-                    )
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_scribe_text),
+                            contentDescription = null,
+                            tint = adaptiveTextColor,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                        Icon(
+                            painter = painterResource(R.drawable.ic_scribe_s),
+                            contentDescription = "Scribe",
+                            tint = accentColor,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                     // Avatar + streak pill (right-aligned column)
                     Column(horizontalAlignment = Alignment.End) {
                         // Circular avatar placeholder
