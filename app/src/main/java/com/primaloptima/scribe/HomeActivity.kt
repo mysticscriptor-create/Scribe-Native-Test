@@ -11,6 +11,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.primaloptima.scribe.data.Book
 import com.primaloptima.scribe.ui.screens.HomeScreen
 import com.primaloptima.scribe.ui.theme.ScribeComposeTheme
+import com.primaloptima.scribe.util.PrefsManager
 import com.primaloptima.scribe.viewmodel.HomeViewModel
 
 class HomeActivity : ComponentActivity() {
@@ -18,26 +19,29 @@ class HomeActivity : ComponentActivity() {
     private val vm: HomeViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // Must be called before super.onCreate()
+
+        // ── Pick the splash style that matches the saved theme ────────────────
+        // Must happen before installSplashScreen() so the SplashScreen compat
+        // library reads the correct windowSplashScreenBackground and
+        // windowSplashScreenAnimatedIconForegroundColor attributes.
+        val prefs = PrefsManager(this)
+        setSplashScreenTheme(splashStyleFor(prefs.activeThemeId))
+
         val splashScreen = installSplashScreen()
         enableEdgeToEdge()
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
         super.onCreate(savedInstanceState)
 
-        // Hold the system splash until the DB has emitted its first result.
-        // vm.books.value is null until Room's first emission — then it becomes
-        // a List<Book> (possibly empty), which is our signal that we're ready.
-        splashScreen.setKeepOnScreenCondition {
-            vm.books.value == null
-        }
+        // Hold the splash until DB emits its first result
+        splashScreen.setKeepOnScreenCondition { vm.books.value == null }
 
-        // Fade the splash out instead of snapping to the home screen.
-        splashScreen.setOnExitAnimationListener { splashViewProvider ->
-            splashViewProvider.view
+        // Fade out instead of snapping
+        splashScreen.setOnExitAnimationListener { provider ->
+            provider.view
                 .animate()
                 .alpha(0f)
                 .setDuration(300)
-                .withEndAction { splashViewProvider.remove() }
+                .withEndAction { provider.remove() }
                 .start()
         }
 
@@ -45,10 +49,10 @@ class HomeActivity : ComponentActivity() {
             ScribeComposeTheme {
                 HomeScreen(
                     vm = vm,
-                    onOpenBook = { book -> openBook(book) },
+                    onOpenBook     = { book -> openBook(book) },
                     onOpenSettings = { startActivity(Intent(this, SettingsActivity::class.java)) },
-                    onOpenSheets = { startActivity(Intent(this, SheetsActivity::class.java)) },
-                    onOpenThemes = { startActivity(Intent(this, ThemeListActivity::class.java)) }
+                    onOpenSheets   = { startActivity(Intent(this, SheetsActivity::class.java)) },
+                    onOpenThemes   = { startActivity(Intent(this, ThemeListActivity::class.java)) }
                 )
             }
         }
@@ -65,5 +69,22 @@ class HomeActivity : ComponentActivity() {
                 .putExtra(BookActivity.EXTRA_BOOK_ID, book.id)
                 .putExtra(BookActivity.EXTRA_BOOK_TITLE, book.title)
         )
+    }
+
+    /**
+     * Maps a theme ID to the pre-defined splash style for that theme.
+     * Built-in themes each have their own style with exact bg + icon colors.
+     * Custom themes fall back to Theme.Scribe.Splash.Custom whose color
+     * resources are written to colors_splash.xml at theme-save time via
+     * PrefsManager.saveSplashColors() — see PrefsManager for details.
+     */
+    private fun splashStyleFor(themeId: String): Int = when (themeId) {
+        "obsidian"   -> R.style.Theme_Scribe_Splash_Obsidian
+        "midnight"   -> R.style.Theme_Scribe_Splash_Midnight
+        "focus"      -> R.style.Theme_Scribe_Splash_Focus
+        "paper"      -> R.style.Theme_Scribe_Splash_Paper
+        "sepia"      -> R.style.Theme_Scribe_Splash_Sepia
+        "typewriter" -> R.style.Theme_Scribe_Splash_Typewriter
+        else         -> R.style.Theme_Scribe_Splash_Custom
     }
 }
