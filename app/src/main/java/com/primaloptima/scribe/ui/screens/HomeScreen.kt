@@ -293,21 +293,21 @@ fun HomeScreen(
 
                 // ── HEADER: icon + wordmark + avatar + streak ──
                 Spacer(modifier = Modifier.height(28.dp))
-                Row(
+                // Use a Box with fillMaxWidth so we can pin wordmark to start
+                // and avatar to end — ModalDrawerSheet's internal Column centers
+                // children, but a fillMaxWidth Box defeats that.
+                androidx.compose.foundation.layout.Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Start
+                        .padding(horizontal = 20.dp)
+                        .height(56.dp)
                 ) {
-                    // Wordmark: two drawables layered in a Box so each can be tinted
-                    // at runtime from LocalAppTheme — fully theme-aware.
-                    // ic_scribe_text = CRIBE letters (adaptiveTextColor)
-                    // ic_scribe_s    = S + quill overlay (accentColor)
+                    // Wordmark pinned to start
                     Box(
                         modifier = Modifier
+                            .align(Alignment.CenterStart)
                             .height(36.dp)
-                            .width(160.dp)  // fixed width matching the wordmark asset
+                            .width(160.dp)
                     ) {
                         Icon(
                             painter = painterResource(R.drawable.ic_scribe_text),
@@ -322,10 +322,11 @@ fun HomeScreen(
                             modifier = Modifier.fillMaxSize()
                         )
                     }
-                    Spacer(modifier = Modifier.weight(1f))
-                    // Avatar + streak pill (right-aligned column)
-                    Column(horizontalAlignment = Alignment.End) {
-                        // Circular avatar placeholder
+                    // Avatar + streak pinned to end
+                    Column(
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                        horizontalAlignment = Alignment.End
+                    ) {
                         Box(
                             modifier = Modifier
                                 .size(40.dp)
@@ -340,8 +341,7 @@ fun HomeScreen(
                                 tint = accentColor
                             )
                         }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        // Streak badge pill
+                        Spacer(modifier = Modifier.height(4.dp))
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
