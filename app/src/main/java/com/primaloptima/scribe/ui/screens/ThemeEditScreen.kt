@@ -70,6 +70,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.input.pointer.awaitPointerEvent
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 
@@ -1288,13 +1289,17 @@ private fun ImageCropScreen(
     // All fractions are relative to the displayed image rect (after letterboxing),
     // NOT to the full screen — this is critical for correct pixel mapping on save.
 
-    // Initial box: as large as possible while fitting inside the image.
+    // Initial box: as large as possible while fitting inside the displayed image.
+    // boxH (image-fraction) = boxW * imageAspect / screenAspect.
+    // For boxH <= 1.0: boxW <= screenAspect / imageAspect.
+    // For boxW <= 1.0: always enforced by coerceIn.
+    // So maxBoxW = min(1f, screenAspect / imageAspect) covers both cases.
+    val imageAspect = (intrinsicW / intrinsicH.coerceAtLeast(1f)).coerceAtLeast(0.01f)
     val initialBoxW = remember(screenAspect, intrinsicW, intrinsicH) {
-        val imageAspect = (intrinsicW / intrinsicH.coerceAtLeast(1f)).coerceAtLeast(0.01f)
-        if (screenAspect <= imageAspect) (screenAspect / imageAspect).coerceIn(0.1f, 1f) else 1f
+        (screenAspect / imageAspect).coerceIn(0.1f, 1f)
     }
-    val initialBoxH = remember(initialBoxW, screenAspect) {
-        (initialBoxW / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.01f, 1f)
+    val initialBoxH = remember(initialBoxW, screenAspect, intrinsicW, intrinsicH) {
+        (initialBoxW * imageAspect / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.01f, 1f)
     }
 
     var boxLeft by remember(initialBoxW) { androidx.compose.runtime.mutableFloatStateOf((1f - initialBoxW) / 2f) }
@@ -1302,13 +1307,16 @@ private fun ImageCropScreen(
     var boxW    by remember(initialBoxW) { androidx.compose.runtime.mutableFloatStateOf(initialBoxW) }
 
     // Height is ALWAYS derived — never stored — so ratio can never drift.
-    fun boxH(): Float = (boxW / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.01f, 1f)
+    // Correct formula: visual pixels = boxW*imgW wide, boxH*imgH tall.
+    // For visual ratio = screenAspect: boxH = boxW * imageAspect / screenAspect.
+    fun boxH(): Float = (boxW * imageAspect / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.01f, 1f)
 
     // Resize the box to a new width, anchoring around a chosen pivot (0=left, 0.5=center, 1=right
     // for X; same for Y). Clamps so box stays inside [0,1].
     fun resizeBox(newW: Float, pivotX: Float = 0.5f, pivotY: Float = 0.5f) {
-        val clampedW = newW.coerceIn(0.05f, 1f)
-        val newH = (clampedW / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.01f, 1f)
+        val maxW = (screenAspect / imageAspect.coerceAtLeast(0.01f)).coerceIn(0.05f, 1f)
+        val clampedW = newW.coerceIn(0.05f, maxW)
+        val newH = (clampedW * imageAspect / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.01f, 1f)
         val oldH = boxH()
         // Shift left/top so the pivot point stays fixed.
         val newLeft = (boxLeft + (boxW - clampedW) * pivotX).coerceIn(0f, maxOf(0f, 1f - clampedW))
@@ -1475,13 +1483,13 @@ private fun ImageCropScreen(
                                 when (corner) {
                                     "BR" -> {
                                         val maxWbyRight  = (1f - boxLeft).coerceAtLeast(0.05f)
-                                        val maxWbyBottom = ((1f - boxTop) * screenAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.05f)
+                                        val maxWbyBottom = ((1f - boxTop) * screenAspect / imageAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.05f)
                                         boxW = (boxW + dx).coerceIn(0.05f, minOf(maxWbyRight, maxWbyBottom))
                                     }
                                     "BL" -> {
                                         val rightEdge    = boxLeft + boxW
                                         val maxWbyLeft   = rightEdge.coerceAtLeast(0.05f)
-                                        val maxWbyBottom = ((1f - boxTop) * screenAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.05f)
+                                        val maxWbyBottom = ((1f - boxTop) * screenAspect / imageAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.05f)
                                         val newW = (boxW - dx).coerceIn(0.05f, minOf(maxWbyLeft, maxWbyBottom))
                                         boxW    = newW
                                         boxLeft = (rightEdge - newW).coerceIn(0f, maxOf(0f, 1f - newW))
@@ -1489,9 +1497,9 @@ private fun ImageCropScreen(
                                     "TR" -> {
                                         val bottomEdge  = boxTop + boxH()
                                         val maxWbyRight = (1f - boxLeft).coerceAtLeast(0.05f)
-                                        val maxWbyTop   = (bottomEdge * screenAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.05f)
+                                        val maxWbyTop   = (bottomEdge * screenAspect / imageAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.05f)
                                         val newW = (boxW + dx).coerceIn(0.05f, minOf(maxWbyRight, maxWbyTop))
-                                        val newH = (newW / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.01f, 1f)
+                                        val newH = (newW * imageAspect / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.01f, 1f)
                                         boxW   = newW
                                         boxTop = (bottomEdge - newH).coerceIn(0f, maxOf(0f, 1f - newH))
                                     }
@@ -1499,9 +1507,9 @@ private fun ImageCropScreen(
                                         val rightEdge  = boxLeft + boxW
                                         val bottomEdge = boxTop  + boxH()
                                         val maxWbyLeft = rightEdge.coerceAtLeast(0.05f)
-                                        val maxWbyTop  = (bottomEdge * screenAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.05f)
+                                        val maxWbyTop  = (bottomEdge * screenAspect / imageAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.05f)
                                         val newW = (boxW - dx).coerceIn(0.05f, minOf(maxWbyLeft, maxWbyTop))
-                                        val newH = (newW / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.01f, 1f)
+                                        val newH = (newW * imageAspect / screenAspect.coerceAtLeast(0.01f)).coerceIn(0.01f, 1f)
                                         boxLeft = (rightEdge  - newW).coerceIn(0f, maxOf(0f, 1f - newW))
                                         boxTop  = (bottomEdge - newH).coerceIn(0f, maxOf(0f, 1f - newH))
                                         boxW    = newW
