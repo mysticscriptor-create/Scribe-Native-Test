@@ -53,6 +53,9 @@ import com.primaloptima.scribe.ui.theme.FrostedDialog
 import com.primaloptima.scribe.ui.theme.FrostedBarContent
 import com.primaloptima.scribe.ui.theme.FrostedPanelContent
 import com.primaloptima.scribe.ui.theme.parseComposeColor
+import com.primaloptima.scribe.ui.theme.adaptiveAccentColor
+import com.primaloptima.scribe.ui.theme.localHasBgImage
+import androidx.compose.material3.LocalContentColor
 import com.primaloptima.scribe.util.BitmapBlur
 import androidx.compose.ui.platform.LocalView
 import com.primaloptima.scribe.ui.theme.rememberAdaptiveTextColor
@@ -286,9 +289,10 @@ fun HomeScreen(
             ) {
                 FrostedPanelContent {
                 val drawerTheme = LocalAppTheme.current
-                val accentColor = drawerTheme?.let {
+                val rawAccentColor = drawerTheme?.let {
                     parseComposeColor(it.colors.accent, MaterialTheme.colorScheme.primary)
                 } ?: MaterialTheme.colorScheme.primary
+                val accentColor = adaptiveAccentColor(rawAccentColor, LocalSolidSurface.current, localHasBgImage())
                 val (adaptiveTextColor, adaptiveTextModifier) = rememberAdaptiveTextColor(
                     fallback = MaterialTheme.colorScheme.onSurface
                 )
@@ -375,13 +379,12 @@ fun HomeScreen(
                     MaterialTheme.colorScheme.surface.copy(alpha = 0.12f)
                 }
 
-                Surface(
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp),
-                    shape = RoundedCornerShape(18.dp),
-                    color = innerCardBg,
-                    tonalElevation = 0.dp
+                        .padding(horizontal = 14.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(innerCardBg)
                 ) {
                     Column(modifier = Modifier.padding(vertical = 12.dp)) {
 
@@ -391,7 +394,7 @@ fun HomeScreen(
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
                             letterSpacing = 1.5.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                            color = LocalContentColor.current.copy(alpha = 0.45f),
                             modifier = Modifier.padding(start = 16.dp, bottom = 4.dp)
                         )
 
@@ -414,7 +417,7 @@ fun HomeScreen(
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
                             letterSpacing = 1.5.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                            color = LocalContentColor.current.copy(alpha = 0.45f),
                             modifier = Modifier.padding(start = 16.dp, bottom = 4.dp)
                         )
 
