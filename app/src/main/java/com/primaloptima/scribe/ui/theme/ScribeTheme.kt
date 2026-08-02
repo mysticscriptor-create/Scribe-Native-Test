@@ -343,23 +343,25 @@ fun FrostedPanelContent(content: @Composable () -> Unit) {
     val solidSurface = LocalSolidSurface.current
     val hasBgImage = localHasBgImage()
     val oneShotBitmap = LocalOneShotBitmap.current
-    val contentColor = if (hasBgImage && oneShotBitmap != null) {
-        // Sample the full one-shot bitmap to get overall image brightness.
-        // The bitmap is already blurred, so a single full-bitmap sample gives a
-        // stable, representative luminance without per-pixel noise.
-        val lum = regionLuminance(
-            bitmap = oneShotBitmap,
-            screenRect = androidx.compose.ui.geometry.Rect(
-                0f, 0f,
-                oneShotBitmap.width.toFloat(),
-                oneShotBitmap.height.toFloat()
-            ),
-            screenWidthPx = oneShotBitmap.width.toFloat(),
-            screenHeightPx = oneShotBitmap.height.toFloat()
-        )
-        if (lum < 0.45) Color.White else Color(0xFF1A1A1A)
-    } else {
-        autoTextColor(solidSurface)
+    // Compute once per bitmap/surface change — not on every recomposition.
+    // The panel background never changes while the drawer is open, so there is no
+    // need to re-sample on every frame.
+    val contentColor = remember(hasBgImage, oneShotBitmap, solidSurface) {
+        if (hasBgImage && oneShotBitmap != null) {
+            val lum = regionLuminance(
+                bitmap = oneShotBitmap,
+                screenRect = androidx.compose.ui.geometry.Rect(
+                    0f, 0f,
+                    oneShotBitmap.width.toFloat(),
+                    oneShotBitmap.height.toFloat()
+                ),
+                screenWidthPx = oneShotBitmap.width.toFloat(),
+                screenHeightPx = oneShotBitmap.height.toFloat()
+            )
+            if (lum < 0.45) Color.White else Color(0xFF1A1A1A)
+        } else {
+            autoTextColor(solidSurface)
+        }
     }
     CompositionLocalProvider(LocalContentColor provides contentColor) {
         content()
