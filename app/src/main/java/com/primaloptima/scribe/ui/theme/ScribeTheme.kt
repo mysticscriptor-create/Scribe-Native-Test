@@ -330,39 +330,11 @@ fun FrostedBarContent(content: @Composable () -> Unit) {
 /**
  * Wraps [content] with LocalContentColor set to contrast against the frosted panel surface.
  * Use this around drawer / side-panel content.
- *
- * FIX: when a background image is active, the panel is frosted glass and the visible
- * surface behind it is the image — not the theme surface color. In that case we sample
- * the overall brightness of the one-shot bitmap (the blurred screenshot captured just
- * before the drawer/panel opened) and choose white or dark text accordingly, so labels
- * and icons inherited via LocalContentColor are always readable regardless of what photo
- * the user has set as their background.
  */
 @Composable
 fun FrostedPanelContent(content: @Composable () -> Unit) {
     val solidSurface = LocalSolidSurface.current
-    val hasBgImage = localHasBgImage()
-    val oneShotBitmap = LocalOneShotBitmap.current
-    // Compute once per bitmap/surface change — not on every recomposition.
-    // The panel background never changes while the drawer is open, so there is no
-    // need to re-sample on every frame.
-    val contentColor = remember(hasBgImage, oneShotBitmap, solidSurface) {
-        if (hasBgImage && oneShotBitmap != null) {
-            val lum = regionLuminance(
-                bitmap = oneShotBitmap,
-                screenRect = androidx.compose.ui.geometry.Rect(
-                    0f, 0f,
-                    oneShotBitmap.width.toFloat(),
-                    oneShotBitmap.height.toFloat()
-                ),
-                screenWidthPx = oneShotBitmap.width.toFloat(),
-                screenHeightPx = oneShotBitmap.height.toFloat()
-            )
-            if (lum < 0.45) Color.White else Color(0xFF1A1A1A)
-        } else {
-            autoTextColor(solidSurface)
-        }
-    }
+    val contentColor = autoTextColor(solidSurface)
     CompositionLocalProvider(LocalContentColor provides contentColor) {
         content()
     }

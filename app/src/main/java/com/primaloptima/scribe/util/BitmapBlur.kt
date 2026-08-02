@@ -203,42 +203,6 @@ object BitmapBlur {
     }
 
     /**
-     * Captures the view's root window directly at a reduced resolution on the Main thread.
-     *
-     * This is significantly faster than [captureOnly] + downscale because the Canvas
-     * draw call itself operates on a smaller bitmap — fewer pixels written, less GPU→CPU
-     * readback, and less memory allocated. At 25 % scale the draw call is ~16× cheaper
-     * than full resolution, which keeps the Main thread free so the drawer slide-in
-     * animation stays smooth.
-     *
-     * The returned bitmap is already downscaled. Pass it directly to [blurBitmap] on a
-     * background thread, then upscale the result back to [targetW] × [targetH] for display.
-     *
-     * Must be called on the MAIN thread.
-     *
-     * @param view    Any view in the target activity window.
-     * @param scale   Capture resolution as a fraction of screen size (default 0.25 = 25 %).
-     * @return        Downscaled software bitmap, or null on error.
-     */
-    fun captureScaled(view: View, scale: Float = 0.25f): Bitmap? {
-        return try {
-            val root = view.rootView
-            val fullW = root.width.coerceAtLeast(1)
-            val fullH = root.height.coerceAtLeast(1)
-            val smallW = (fullW * scale).toInt().coerceAtLeast(1)
-            val smallH = (fullH * scale).toInt().coerceAtLeast(1)
-            val bmp = Bitmap.createBitmap(smallW, smallH, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bmp)
-            // Scale the canvas so the entire view tree draws into the smaller bitmap.
-            canvas.scale(scale, scale)
-            root.draw(canvas)
-            bmp
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    /**
      * Pure Kotlin stack blur (Zhu/Rijnders algorithm).
      * Significantly smoother than box blur at the same radius.
      * Operates in-place on a copy of [src]; does not recycle [src].

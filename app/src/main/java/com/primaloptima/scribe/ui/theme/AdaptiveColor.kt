@@ -74,13 +74,7 @@ fun rememberAdaptiveTextColor(
     darkColor: Color = Color(0xFF1A1A1A),
     fallback: Color = Color.Unspecified
 ): Pair<Color, Modifier> {
-    // FIX: fall back to LocalOneShotBitmap when LocalBgAnalysisBitmap is null.
-    // LocalBgAnalysisBitmap is only provided at the root ScribeComposeTheme level,
-    // so it is always null inside drawers and dialogs. Those contexts provide
-    // LocalOneShotBitmap instead (a captured + blurred screenshot taken just before
-    // the panel opens). By chaining the two locals here, rememberAdaptiveTextColor
-    // now works correctly in both the main UI and inside any panel/dialog.
-    val bitmap = LocalBgAnalysisBitmap.current ?: LocalOneShotBitmap.current
+    val bitmap = LocalBgAnalysisBitmap.current
     val (screenW, screenH) = LocalScreenSize.current
     if (bitmap == null) return Pair(fallback, Modifier)
 
@@ -104,40 +98,4 @@ fun rememberAdaptiveTextColor(
         }
     }
     return Pair(color, trackingModifier)
-}
-
-/**
- * A lightweight alternative to [rememberAdaptiveTextColor] for use inside drawers,
- * panels, and dialogs where the background never changes while the panel is open.
- *
- * Instead of tracking the element's position and sampling the bitmap on every layout
- * change, this computes the text color exactly once — derived from the overall
- * brightness of whichever bitmap is available (the tiny analysis bitmap from the
- * theme, or the one-shot capture taken when the panel opened). The result is
- * [remember]ed and only recomputed if the bitmap or color arguments change, which
- * only happens when the user switches themes or background images.
- *
- * Use this everywhere the background behind the text is static (drawers, dialogs,
- * side panels). Keep [rememberAdaptiveTextColor] only for elements on the main screen
- * that scroll over a changing background image.
- */
-@Composable
-fun rememberStaticTextColor(
-    lightColor: Color = Color.White,
-    darkColor: Color = Color(0xFF1A1A1A),
-    fallback: Color = Color.Unspecified
-): Color {
-    val bitmap = LocalBgAnalysisBitmap.current ?: LocalOneShotBitmap.current
-    return remember(bitmap, lightColor, darkColor) {
-        if (bitmap == null) return@remember fallback
-        // Sample the entire bitmap as one region — for a panel/drawer the whole
-        // captured background is what matters, not any specific sub-region.
-        val lum = regionLuminance(
-            bitmap = bitmap,
-            screenRect = Rect(0f, 0f, bitmap.width.toFloat(), bitmap.height.toFloat()),
-            screenWidthPx = bitmap.width.toFloat(),
-            screenHeightPx = bitmap.height.toFloat()
-        )
-        if (lum < 0.45) lightColor else darkColor
-    }
 }
