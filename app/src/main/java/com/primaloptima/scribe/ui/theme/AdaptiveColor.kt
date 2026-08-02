@@ -74,7 +74,13 @@ fun rememberAdaptiveTextColor(
     darkColor: Color = Color(0xFF1A1A1A),
     fallback: Color = Color.Unspecified
 ): Pair<Color, Modifier> {
-    val bitmap = LocalBgAnalysisBitmap.current
+    // FIX: fall back to LocalOneShotBitmap when LocalBgAnalysisBitmap is null.
+    // LocalBgAnalysisBitmap is only provided at the root ScribeComposeTheme level,
+    // so it is always null inside drawers and dialogs. Those contexts provide
+    // LocalOneShotBitmap instead (a captured + blurred screenshot taken just before
+    // the panel opens). By chaining the two locals here, rememberAdaptiveTextColor
+    // now works correctly in both the main UI and inside any panel/dialog.
+    val bitmap = LocalBgAnalysisBitmap.current ?: LocalOneShotBitmap.current
     val (screenW, screenH) = LocalScreenSize.current
     if (bitmap == null) return Pair(fallback, Modifier)
 
