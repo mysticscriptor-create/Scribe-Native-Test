@@ -118,6 +118,37 @@ fun autoTextColor(bg: Color): Color {
     return if (luminance > 0.5f) Color.Black else Color.White
 }
 
+/**
+ * Returns an accent color guaranteed to be visible against the surface.
+ * - No background image → returns the original theme accent unchanged.
+ * - Background image active → checks contrast ratio between accent and surface.
+ *   If contrast is already good enough (≥ 2.5), keeps the original accent.
+ *   If contrast is too low, blends the accent toward white or black just enough
+ *   to be readable, while keeping a subtle hint of the original hue.
+ */
+fun adaptiveAccentColor(
+    accent: Color,
+    solidSurface: Color,
+    hasBgImage: Boolean
+): Color {
+    if (!hasBgImage) return accent
+    val surfaceLum = solidSurface.luminance()
+    val accentLum = accent.luminance()
+    val lighter = maxOf(surfaceLum, accentLum)
+    val darker = minOf(surfaceLum, accentLum)
+    val contrastRatio = (lighter + 0.05f) / (darker + 0.05f)
+    if (contrastRatio >= 2.5f) return accent
+    // Blend accent toward the readable color (white or black) by 55%
+    val readable = if (surfaceLum > 0.5f) Color.Black else Color.White
+    val t = 0.55f
+    return Color(
+        red = accent.red + (readable.red - accent.red) * t,
+        green = accent.green + (readable.green - accent.green) * t,
+        blue = accent.blue + (readable.blue - accent.blue) * t,
+        alpha = accent.alpha
+    )
+}
+
 @Composable
 fun localHasBgImage(): Boolean {
     val theme = LocalAppTheme.current
