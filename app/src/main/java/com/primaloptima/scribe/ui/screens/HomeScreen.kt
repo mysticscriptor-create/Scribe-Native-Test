@@ -59,6 +59,7 @@ import androidx.compose.material3.LocalContentColor
 import com.primaloptima.scribe.util.BitmapBlur
 import androidx.compose.ui.platform.LocalView
 import com.primaloptima.scribe.ui.theme.rememberAdaptiveTextColor
+import com.primaloptima.scribe.ui.theme.rememberStaticTextColor
 import dev.chrisbanes.haze.hazeSource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -99,7 +100,13 @@ fun HomeScreen(
     var rightPanelVisible by remember { mutableStateOf(false) }
     var fabExpanded by remember { mutableStateOf(false) }
 
-    // One-shot blurred capture for pre-API-31 frosted glass on the left drawer
+    // One-shot blurred capture for pre-API-31 frosted glass on the left drawer.
+    //
+    // FIX: replaced captureOnly (full-res draw on Main thread → ~8 MB bitmap → jank)
+    // with captureScaled (draws at 25 % scale on Main thread → ~0.5 MB bitmap → smooth).
+    // The canvas.scale() trick means the View tree draws directly into the small bitmap,
+    // so the expensive Main-thread work is ~16× cheaper. The blur then runs on IO as
+    // before, and the result is upscaled back to full screen size for display.
     val view = LocalView.current
     val blurRadiusPx = com.primaloptima.scribe.ui.theme.LocalFrostedBlurRadius.current.toInt().coerceIn(1, 25)
     var oneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -108,9 +115,21 @@ fun HomeScreen(
         LaunchedEffect(drawerState.currentValue, drawerState.targetValue) {
             if (drawerState.targetValue == DrawerValue.Open && !captured) {
                 captured = true
-                val raw = BitmapBlur.captureOnly(view)  // must stay on Main thread
+                // captureScaled draws at 25 % on the Main thread — much cheaper than
+                // captureOnly which draws the full ~8 MB screen bitmap.
+                val small = BitmapBlur.captureScaled(view, scale = 0.25f)
                 oneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
+                    small?.let { s ->
+                        val fullW = view.rootView.width.coerceAtLeast(1)
+                        val fullH = view.rootView.height.coerceAtLeast(1)
+                        val blurred = BitmapBlur.blurBitmap(s, radius = blurRadiusPx)
+                        s.recycle()
+                        // Upscale back to full screen size so drawWithOneShotBitmap
+                        // has correct pixel dimensions for coordinate mapping.
+                        val result = android.graphics.Bitmap.createScaledBitmap(blurred, fullW, fullH, true)
+                        blurred.recycle()
+                        result
+                    }
                 }
             } else if (drawerState.currentValue == DrawerValue.Closed &&
                        drawerState.targetValue == DrawerValue.Closed) {
@@ -129,9 +148,17 @@ fun HomeScreen(
         LaunchedEffect(rightPanelVisible) {
             if (rightPanelVisible && !rightCaptured) {
                 rightCaptured = true
-                val raw = BitmapBlur.captureOnly(view)
+                val small = BitmapBlur.captureScaled(view, scale = 0.25f)
                 rightOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
+                    small?.let { s ->
+                        val fullW = view.rootView.width.coerceAtLeast(1)
+                        val fullH = view.rootView.height.coerceAtLeast(1)
+                        val blurred = BitmapBlur.blurBitmap(s, radius = blurRadiusPx)
+                        s.recycle()
+                        val result = android.graphics.Bitmap.createScaledBitmap(blurred, fullW, fullH, true)
+                        blurred.recycle()
+                        result
+                    }
                 }
             } else if (!rightPanelVisible) {
                 // Wait for the 200ms slide-out animation before clearing
@@ -225,11 +252,19 @@ fun HomeScreen(
     // All of this happens before the dialog composable ever enters the tree.
     val captureForDialog: suspend (() -> Unit) -> Unit = { openDialog ->
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-            // captureOnly uses view.rootView.draw() which requires the Main thread.
-            // scope.launch / LaunchedEffect both run on Main by default, so this is safe.
-            val raw = BitmapBlur.captureOnly(view)
+            // Use captureScaled (25 % resolution) so the Main-thread draw call is cheap
+            // and doesn't cause a visible freeze before the dialog appears.
+            val small = BitmapBlur.captureScaled(view, scale = 0.25f)
             dialogOneShotBitmap = withContext(Dispatchers.IO) {
-                raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
+                small?.let { s ->
+                    val fullW = view.rootView.width.coerceAtLeast(1)
+                    val fullH = view.rootView.height.coerceAtLeast(1)
+                    val blurred = BitmapBlur.blurBitmap(s, radius = blurRadiusPx)
+                    s.recycle()
+                    val result = android.graphics.Bitmap.createScaledBitmap(blurred, fullW, fullH, true)
+                    blurred.recycle()
+                    result
+                }
             }
         }
         openDialog()   // NOW set the flag — dialog renders with bitmap already in place
@@ -293,7 +328,11 @@ fun HomeScreen(
                     parseComposeColor(it.colors.accent, MaterialTheme.colorScheme.primary)
                 } ?: MaterialTheme.colorScheme.primary
                 val accentColor = adaptiveAccentColor(rawAccentColor, LocalSolidSurface.current, localHasBgImage())
-                val (adaptiveTextColor, adaptiveTextModifier) = rememberAdaptiveTextColor(
+                // Use rememberStaticTextColor (not rememberAdaptiveTextColor) — the drawer
+                // background never changes while it is open, so there is no need for live
+                // per-frame position tracking. The color is computed once from the overall
+                // image brightness and cached until the theme or background image changes.
+                val adaptiveTextColor = com.primaloptima.scribe.ui.theme.rememberStaticTextColor(
                     fallback = MaterialTheme.colorScheme.onSurface
                 )
                 val currentStreak by vm.currentStreak.collectAsState()
