@@ -307,19 +307,23 @@ fun HomeScreen(
                     Box(
                         modifier = Modifier
                             .height(36.dp)
-                            .width(160.dp)
+                            .wrapContentWidth()
                     ) {
                         Icon(
                             painter = painterResource(R.drawable.ic_scribe_text),
                             contentDescription = null,
                             tint = adaptiveTextColor,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .aspectRatio(2048f / 922f)
                         )
                         Icon(
                             painter = painterResource(R.drawable.ic_scribe_s),
                             contentDescription = "Scribe",
                             tint = accentColor,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .aspectRatio(2048f / 922f)
                         )
                     }
                     // Avatar + streak pinned to end
