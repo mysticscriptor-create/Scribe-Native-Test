@@ -69,6 +69,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.material3.LocalContentColor
 
 val LocalHazeState = compositionLocalOf<HazeState?> { null }
 val LocalAppTheme = compositionLocalOf<AppTheme?> { null }
@@ -271,6 +272,57 @@ fun Modifier.frostedCard(
     }
 }
 
+// ── Composable wrappers that combine frosted modifiers with LocalContentColor ──
+//
+// The frosted*() modifier functions are @Composable but return a Modifier, so they
+// cannot host CompositionLocalProvider themselves. These wrapper composables apply
+// both the frosted modifier AND set LocalContentColor to the correct contrasting
+// colour so every Text and Icon inside inherits the right colour automatically,
+// with no per-element colour arguments needed.
+//
+// autoTextColor() (defined above) returns Black for light surfaces, White for dark.
+
+/**
+ * Wraps [content] with LocalContentColor set to contrast against the frosted bar surface.
+ * Use this around TopAppBar / NavigationBar / BottomAppBar content lambdas.
+ */
+@Composable
+fun FrostedBarContent(content: @Composable () -> Unit) {
+    val solidSurface = LocalSolidSurface.current
+    val hasBgImage = localHasBgImage()
+    val contentColor = if (hasBgImage) autoTextColor(solidSurface) else autoTextColor(solidSurface)
+    CompositionLocalProvider(LocalContentColor provides contentColor) {
+        content()
+    }
+}
+
+/**
+ * Wraps [content] with LocalContentColor set to contrast against the frosted panel surface.
+ * Use this around drawer / side-panel content.
+ */
+@Composable
+fun FrostedPanelContent(content: @Composable () -> Unit) {
+    val solidSurface = LocalSolidSurface.current
+    val contentColor = autoTextColor(solidSurface)
+    CompositionLocalProvider(LocalContentColor provides contentColor) {
+        content()
+    }
+}
+
+/**
+ * Wraps [content] with LocalContentColor set to contrast against the frosted card surface.
+ * Use this around card body content.
+ */
+@Composable
+fun FrostedCardContent(content: @Composable () -> Unit) {
+    val solidSurface = LocalSolidSurface.current
+    val hasBgImage = localHasBgImage()
+    val contentColor = if (hasBgImage) autoTextColor(solidSurface) else LocalContentColor.current
+    CompositionLocalProvider(LocalContentColor provides contentColor) {
+        content()
+    }
+}
+
 /**
  * A dialog that lives in the same window as the rest of the UI, so Haze blur works correctly.
  * Standard AlertDialog creates a separate Android window which breaks hazeEffect.
@@ -324,6 +376,8 @@ fun FrostedDialog(
                 Modifier.background(solidSurface, shape = shape)
         }
 
+        val dialogContentColor = autoTextColor(solidSurface)
+        CompositionLocalProvider(LocalContentColor provides dialogContentColor) {
         Column(
             modifier = Modifier
                 .fillMaxWidth(0.85f)
@@ -358,6 +412,7 @@ fun FrostedDialog(
                 confirmButton()
             }
         }
+        } // end CompositionLocalProvider(LocalContentColor for dialog)
     }
 }
 
