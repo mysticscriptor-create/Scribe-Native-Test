@@ -50,6 +50,8 @@ import com.primaloptima.scribe.ui.theme.frostedContainerColor
 import com.primaloptima.scribe.ui.theme.frostedFab
 import com.primaloptima.scribe.ui.theme.frostedPanel
 import com.primaloptima.scribe.ui.theme.FrostedDialog
+import com.primaloptima.scribe.ui.theme.FrostedBarContent
+import com.primaloptima.scribe.ui.theme.FrostedPanelContent
 import com.primaloptima.scribe.ui.theme.parseComposeColor
 import com.primaloptima.scribe.util.BitmapBlur
 import androidx.compose.ui.platform.LocalView
@@ -282,6 +284,7 @@ fun HomeScreen(
                     .fillMaxWidth(0.78f)
                     .frostedPanel(hazeState)
             ) {
+                FrostedPanelContent {
                 val drawerTheme = LocalAppTheme.current
                 val accentColor = drawerTheme?.let {
                     parseComposeColor(it.colors.accent, MaterialTheme.colorScheme.primary)
@@ -439,6 +442,7 @@ fun HomeScreen(
                     }
                 }
             }
+                } // end FrostedPanelContent
             } // end CompositionLocalProvider(LocalOneShotBitmap provides oneShotBitmap)
         }
     ) {
@@ -450,6 +454,7 @@ fun HomeScreen(
                 // LocalBarBlurBitmap is provided by ScribeTheme from the Coil bitmap —
                 // no screen capture needed; already available when the image is loaded.
                 CompositionLocalProvider(LocalOneShotBitmap provides LocalBarBlurBitmap.current) {
+                FrostedBarContent {
                 TopAppBar(
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = Color.Transparent
@@ -570,10 +575,12 @@ fun HomeScreen(
                         }
                     }
                 )
+                } // end FrostedBarContent for topBar
                 } // end CompositionLocalProvider(LocalBarBlurBitmap for topBar)
             },
             bottomBar = {
                 CompositionLocalProvider(LocalOneShotBitmap provides LocalBarBlurBitmap.current) {
+                FrostedBarContent {
                 NavigationBar(
                     containerColor = Color.Transparent,
                     tonalElevation = 0.dp,
@@ -623,6 +630,7 @@ fun HomeScreen(
                         colors = navColors
                     )
                 }
+                } // end FrostedBarContent for bottomBar
                 } // end CompositionLocalProvider(LocalBarBlurBitmap for bottomBar)
             },
             floatingActionButton = {
@@ -913,6 +921,7 @@ fun HomeScreen(
                         allNotes.sumOf { n -> n.content.split("\\s+".toRegex()).count { it.isNotBlank() } }
                     }
                     CompositionLocalProvider(LocalOneShotBitmap provides rightOneShotBitmap) {
+                    FrostedPanelContent {
                     Column(
                         modifier = Modifier
                             .fillMaxHeight()
@@ -961,6 +970,7 @@ fun HomeScreen(
                             Text("Themes")
                         }
                     }
+                    } // end FrostedPanelContent for right panel
                     } // end CompositionLocalProvider(rightOneShotBitmap for right panel)
                 }
             }
@@ -1072,8 +1082,7 @@ private fun DrawerNavItem(
         Spacer(modifier = Modifier.width(14.dp))
         Text(
             text = label,
-            fontSize = 15.sp,
-            color = MaterialTheme.colorScheme.onSurface
+            fontSize = 15.sp
         )
     }
 }
@@ -1291,7 +1300,7 @@ private fun BookGridCard(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onBackground,
+            color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp)
         )
 
@@ -1571,9 +1580,9 @@ private fun StatPanelRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+            Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
             Text(label, fontSize = 15.sp)
         }
-        Text(value, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        Text(value, fontSize = 15.sp, fontWeight = FontWeight.Bold)
     }
 }
