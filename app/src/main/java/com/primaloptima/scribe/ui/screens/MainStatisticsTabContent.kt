@@ -37,10 +37,9 @@ import com.primaloptima.scribe.data.Folder
 import com.primaloptima.scribe.data.Note
 import com.primaloptima.scribe.util.PrefsManager
 import com.primaloptima.scribe.util.ThemeDataStoreRepo
-import com.primaloptima.scribe.ui.theme.LocalAppTheme
+import com.primaloptima.scribe.ui.theme.LocalAccentColor
 import com.primaloptima.scribe.ui.theme.LocalHazeState
 import com.primaloptima.scribe.ui.theme.LocalOneShotBitmap
-import com.primaloptima.scribe.ui.theme.parseComposeColor
 import com.primaloptima.scribe.ui.theme.rememberAdaptiveTextColor
 import com.primaloptima.scribe.ui.theme.frostedCard
 import com.primaloptima.scribe.ui.theme.frostedContainerColor
@@ -73,9 +72,7 @@ fun MainStatisticsTabContent(
     allFolders: List<Folder>
 ) {
     var selectedTopTab by remember { mutableIntStateOf(0) } // 0: Statistics, 1: Wordmap
-    val activeTheme = LocalAppTheme.current
-    val accent = activeTheme?.let { parseComposeColor(it.colors.accent, MaterialTheme.colorScheme.primary) }
-        ?: MaterialTheme.colorScheme.primary
+    val accent = LocalAccentColor.current
 
     Column(modifier = Modifier.fillMaxSize()) {
         Surface(
@@ -196,7 +193,7 @@ private fun DetailedStatisticsTab(
             shape = RoundedCornerShape(16.dp),
             elevation = CardDefaults.elevatedCardElevation(defaultElevation = 6.dp),
             colors = CardDefaults.elevatedCardColors(
-                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+                containerColor = frostedContainerColor(fallback = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f))
             )
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
@@ -212,8 +209,7 @@ private fun DetailedStatisticsTab(
                         color = MaterialTheme.colorScheme.onSurface
                     )
 
-                    val segAccent = LocalAppTheme.current?.let { parseComposeColor(it.colors.accent, MaterialTheme.colorScheme.primary) }
-                        ?: MaterialTheme.colorScheme.primary
+                    val segAccent = LocalAccentColor.current
                     SingleChoiceSegmentedButtonRow {
                         ChartRange.entries.forEachIndexed { index, range ->
                             SegmentedButton(
@@ -252,7 +248,7 @@ private fun DetailedStatisticsTab(
                     .frostedCard(hazeState, shape = RoundedCornerShape(12.dp)),
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+                    containerColor = frostedContainerColor(fallback = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
                 )
             ) {
                 Column(
@@ -287,7 +283,7 @@ private fun DetailedStatisticsTab(
                     .frostedCard(hazeState, shape = RoundedCornerShape(12.dp)),
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+                    containerColor = frostedContainerColor(fallback = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
                 )
             ) {
                 Column(
@@ -322,7 +318,7 @@ private fun DetailedStatisticsTab(
                     .frostedCard(hazeState, shape = RoundedCornerShape(12.dp)),
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+                    containerColor = frostedContainerColor(fallback = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
                 )
             ) {
                 Column(
@@ -358,7 +354,7 @@ private fun DetailedStatisticsTab(
                 .frostedCard(hazeState, shape = RoundedCornerShape(12.dp)),
             shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.elevatedCardColors(
-                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+                containerColor = frostedContainerColor(fallback = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
             )
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
@@ -663,8 +659,7 @@ private fun DetailedWordmapTab(
             verticalAlignment = Alignment.CenterVertically
         ) {
             val categories = listOf("Files", "Folders", "Books")
-            val wordmapAccent = LocalAppTheme.current?.let { parseComposeColor(it.colors.accent, MaterialTheme.colorScheme.primary) }
-                ?: MaterialTheme.colorScheme.primary
+            val wordmapAccent = LocalAccentColor.current
             SingleChoiceSegmentedButtonRow(modifier = Modifier.weight(1f)) {
                 categories.forEachIndexed { index, title ->
                     SegmentedButton(
