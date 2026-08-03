@@ -157,7 +157,7 @@ fun ThemeEditScreen(
             scope.launch {
                 // Copy to internal storage first so the crop screen has a stable
                 // file:// URI it can read (SAF content:// may lose permission).
-                val localUri = SAFHelper.copyBgImageToInternalStorage(context, uri)
+                val localUri = SAFHelper.copyBgImageToInternalStorage(context, uri, themeId)
                 val stableUri = (localUri ?: uri).toString()
                 pendingCropUri = stableUri
                 // Store original so user can re-crop later without quality loss
@@ -1636,8 +1636,10 @@ private fun ImageCropScreen(
                                     val scaled = android.graphics.Bitmap.createScaledBitmap(cropped, targetW, targetH, true)
                                     if (scaled !== cropped) cropped.recycle()
 
-                                    val dir = java.io.File(context.filesDir, "bg_images").also { it.mkdirs() }
-                                    val dest = java.io.File(dir, "theme_bg_crop_${System.currentTimeMillis()}.jpg")
+                                    // Per-theme folder: same folder as the original, fixed filename.
+                                    // Overwriting "crop.jpg" replaces the previous crop with no accumulation.
+                                    val dir = java.io.File(context.filesDir, "bg_images/$themeId").also { it.mkdirs() }
+                                    val dest = java.io.File(dir, "crop.jpg")
                                     dest.outputStream().use { out ->
                                         scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, out)
                                     }
