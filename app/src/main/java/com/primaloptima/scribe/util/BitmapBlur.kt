@@ -1,9 +1,7 @@
 package com.primaloptima.scribe.util
 
-import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Paint
 import android.graphics.Rect
 import android.view.View
 import androidx.annotation.WorkerThread
@@ -19,19 +17,25 @@ import androidx.annotation.WorkerThread
  *                         blurs, then upscales back. Call from a background thread.
  *
  * Both functions are @WorkerThread — always call from Dispatchers.IO.
+ *
+ * Frosted-glass finish (brightness lift + grain) is applied as the FINAL step
+ * inside both entry points so drawers, panels, dialogs and wallpapers only ever
+ * receive the completed glassy result.
  */
 object BitmapBlur {
 
     // ─── Public API ──────────────────────────────────────────────────────────
 
     /**
-     * Blurs [src] in-place using a 3-pass box blur approximation of Gaussian.
+     * Blurs [src] using a stack-blur approximation of Gaussian.
      * Downscales to 40 % before blurring and upscales back — quality is identical
-     * for frosted glass but ~6× faster than blurring full resolution.
+     * for frosted glass but \~6× faster than blurring full resolution.
+     *
+     * The frosted-glass look is applied as the last step.
      *
      * @param src     Source bitmap (ARGB_8888). Not recycled by this call.
      * @param radius  Blur radius 1–25 px (clamped).
-     * @return        New blurred bitmap at the same size as [src].
+     * @return        New blurred + frosted bitmap at the same size as [src].
      */
     @WorkerThread
     fun blurBitmap(src: Bitmap, radius: Int): Bitmap {
@@ -45,9 +49,12 @@ object BitmapBlur {
         )
         val blurred = stackBlur(small, r)
         small.recycle()
-        val result = Bitmap.createScaledBitmap(blurred, src.width, src.height, true)
+        val upscaled = Bitmap.createScaledBitmap(blurred, src.width, src.height, true)
         blurred.recycle()
-        return result
+        // Always apply the frosted glass finish (brightness lift + grain) so every
+        // caller gets the same glassy quality without each call site having to
+        // remember to chain it.
+        return applyFrostedGlassLook(upscaled)
     }
 
     /**
@@ -59,8 +66,8 @@ object BitmapBlur {
      *  2. Noise grain overlay — the fine grain texture is what makes glass *feel* like
      *     glass instead of just "blurry". Haze calls this noiseFactor.
      *
-     * Call this on the result of [blurBitmap] or [captureAndBlur] before displaying it
-     * as a panel/drawer/dialog background on pre-API-31 devices.
+     * Called automatically by [blurBitmap] and [captureAndBlur]. You normally do not
+     * need to call this yourself.
      *
      * @param src         Blurred bitmap (ARGB_8888). Modified in-place.
      * @param brightness  How much to brighten (0f = no change, 0.15f = subtle lift).
@@ -116,16 +123,16 @@ object BitmapBlur {
     }
 
     /**
-     * One-shot screen capture + blur for pre-Android-12 frosted glass on panels/dialogs.
+     * One-shot screen capture + blur for pre-Android-12 frosted glass on panels/dialogs/drawers.
      *
-     * Captures the current window content via [View.drawToBitmap], optionally crops
-     * to [cropRect], downscales to 25 %, blurs with [radius], then upscales back.
-     * The result is a static bitmap that can be drawn as the panel background.
+     * Captures the current window content, optionally crops to [cropRect], downscales
+     * to 25 %, blurs with [radius], upscales back, then applies the frosted-glass finish
+     * as the final step. Callers only ever receive the completed glassy bitmap.
      *
      * @param view      Any view in the target activity window (used to get the window).
      * @param cropRect  Region to capture in screen pixels, or null for full screen.
      * @param radius    Blur radius 1–25 (clamped). Default 15 matches app default.
-     * @return          Blurred bitmap at [cropRect] size (or full screen), or null on error.
+     * @return          Blurred + frosted bitmap at [cropRect] size (or full screen), or null on error.
      */
     @WorkerThread
     fun captureAndBlur(
@@ -158,12 +165,16 @@ object BitmapBlur {
                 full
             }
 
+            // Save dimensions before recycling
+            val targetW = cropped.width
+            val targetH = cropped.height
+
             // Downscale to 25 % — frosted glass is low-frequency, quality is identical
             val scale = 0.25f
             val small = Bitmap.createScaledBitmap(
                 cropped,
-                (cropped.width * scale).toInt().coerceAtLeast(1),
-                (cropped.height * scale).toInt().coerceAtLeast(1),
+                (targetW * scale).toInt().coerceAtLeast(1),
+                (targetH * scale).toInt().coerceAtLeast(1),
                 true
             )
             cropped.recycle()
@@ -174,9 +185,13 @@ object BitmapBlur {
 
             // Upscale back with bilinear filtering — the upscale softens any
             // pixelation and enhances the frosted look
-            val result = Bitmap.createScaledBitmap(blurred, cropped.width, cropped.height, true)
+            val upscaled = Bitmap.createScaledBitmap(blurred, targetW, targetH, true)
             blurred.recycle()
-            result
+
+            // FINAL step: apply frosted-glass look only after the entire one-shot
+            // pipeline has finished. Drawers / panels / dialogs therefore only ever
+            // see the completed glassy result.
+            applyFrostedGlassLook(upscaled)
         } catch (_: Exception) {
             null
         }
@@ -205,7 +220,7 @@ object BitmapBlur {
     /**
      * Pure Kotlin stack blur (Zhu/Rijnders algorithm).
      * Significantly smoother than box blur at the same radius.
-     * Operates in-place on a copy of [src]; does not recycle [src].
+     * Operates on a copy of [src]; does not recycle [src].
      */
     private fun stackBlur(src: Bitmap, radius: Int): Bitmap {
         val w = src.width
@@ -216,7 +231,6 @@ object BitmapBlur {
         val div = radius + radius + 1
         val wm = w - 1
         val hm = h - 1
-        val wh = w * h
         val divSum = (div + 1) shr 1
         val divSum2 = divSum * divSum
 
