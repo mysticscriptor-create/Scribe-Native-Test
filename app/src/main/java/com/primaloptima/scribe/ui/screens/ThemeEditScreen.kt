@@ -44,7 +44,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import coil3.BitmapImage
+import coil3.ImageLoader
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.allowHardware
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -113,6 +117,11 @@ fun ThemeEditScreen(
 
     var activeColorPickerTarget by remember { mutableStateOf<ColorPickerTarget?>(null) }
     var showEmojiDialog by remember { mutableStateOf(false) }
+    // Average luminance of the background image — computed once at crop-confirm time
+    // via Coil (same pipeline as ScribeComposeTheme) so content:// URIs work correctly.
+    // -1f means not yet computed (no image, or pre-existing theme).
+    var bgLuminance by remember(originalTheme) { mutableFloatStateOf(originalTheme.savedBgLuminance) }
+
     // Crop screen: shown after the user picks a new background image
     var showCropScreen by remember { mutableStateOf(false) }
     var pendingCropUri by remember { mutableStateOf<String?>(null) }
@@ -198,6 +207,7 @@ fun ThemeEditScreen(
                             textAlignment = textAlignment,
                             themeScope = themeScope,
                             emoji = emoji,
+                            savedBgLuminance = bgLuminance,
                             colors = originalTheme.colors.copy(
                                 background = bgHex,
                                 surface = bgHex,
@@ -663,6 +673,7 @@ fun ThemeEditScreen(
                         textAlignment = textAlignment,
                         themeScope = themeScope,
                         emoji = emoji,
+                        savedBgLuminance = bgLuminance,
                         colors = originalTheme.colors.copy(
                             background = bgHex,
                             surface = bgHex,
@@ -813,6 +824,13 @@ fun ThemeEditScreen(
                     if (bgMode == "color") bgMode = "image"
                     showCropScreen = false
                     pendingCropUri = null
+                    // Compute average luminance from the freshly-saved image using Coil —
+                    // the same pipeline ScribeComposeTheme uses, so content:// URIs are
+                    // handled correctly on all API levels. Stored in bgLuminance so that
+                    // both save sites include it in savedBgLuminance without re-processing.
+                    scope.launch {
+                        bgLuminance = computeBgLuminance(context, croppedUri)
+                    }
                 },
                 onCancel = {
                     showCropScreen = false
@@ -1661,6 +1679,54 @@ private fun ImageCropScreen(
                     Text("Use this crop")
                 }
             }
+        }
+    }
+}
+
+/**
+ * Loads [imageUri] through Coil at a tiny 32×32 resolution (same as ScribeComposeTheme's
+ * analysisBitmap) and returns the average linear luminance across all pixels.
+ *
+ * Using Coil — not BitmapFactory.decodeFile — is critical because [imageUri] may be a
+ * content:// URI (produced by SAF after a crop). BitmapFactory.decodeFile only handles
+ * file:// paths and returns null for content:// URIs, making luminance always -1f.
+ * Coil resolves both URI types correctly on all API levels.
+ *
+ * Returns -1f on any error so callers can treat it as "not computed".
+ * This function is suspend so it must be called from a coroutine (e.g. scope.launch).
+ */
+private suspend fun computeBgLuminance(context: android.content.Context, imageUri: String): Float {
+    return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
+            val request = coil3.request.ImageRequest.Builder(context)
+                .data(imageUri)
+                .size(coil3.size.Size(32, 32))
+                .allowHardware(false) // getPixel() requires software bitmap config
+                .build()
+            val bitmap = (coil3.ImageLoader(context).execute(request) as? coil3.request.SuccessResult)
+                ?.image
+                ?.let { (it as? coil3.BitmapImage)?.bitmap }
+                ?: return@withContext -1f
+
+            val w = bitmap.width
+            val h = bitmap.height
+            if (w == 0 || h == 0) return@withContext -1f
+
+            var total = 0.0
+            for (x in 0 until w) {
+                for (y in 0 until h) {
+                    val pixel = bitmap.getPixel(x, y)
+                    // Convert sRGB channels to linear luminance (WCAG relative luminance formula)
+                    val r = android.graphics.Color.red(pixel) / 255.0
+                    val g = android.graphics.Color.green(pixel) / 255.0
+                    val b = android.graphics.Color.blue(pixel) / 255.0
+                    total += 0.2126 * r + 0.7152 * g + 0.0722 * b
+                }
+            }
+            bitmap.recycle()
+            (total / (w * h)).toFloat().coerceIn(0f, 1f)
+        } catch (_: Exception) {
+            -1f
         }
     }
 }

@@ -99,6 +99,7 @@ fun HomeScreen(
     var rightPanelVisible by remember { mutableStateOf(false) }
     var fabExpanded by remember { mutableStateOf(false) }
 
+    // One-shot blurred capture for pre-API-31 frosted glass on the left drawer
     val view = LocalView.current
     val blurRadiusPx = com.primaloptima.scribe.ui.theme.LocalFrostedBlurRadius.current.toInt().coerceIn(1, 25)
     var oneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -107,17 +108,21 @@ fun HomeScreen(
         LaunchedEffect(drawerState.currentValue, drawerState.targetValue) {
             if (drawerState.targetValue == DrawerValue.Open && !captured) {
                 captured = true
-                val raw = BitmapBlur.captureOnly(view)
+                val raw = BitmapBlur.captureOnly(view)  // must stay on Main thread
                 oneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
                 }
             } else if (drawerState.currentValue == DrawerValue.Closed &&
                        drawerState.targetValue == DrawerValue.Closed) {
+                // Only clear when fully settled — not mid close-animation
                 captured = false
                 oneShotBitmap = null
             }
         }
     }
+    // One-shot bitmap for the right panel (same pattern as left drawer).
+    // Captured when rightPanelVisible becomes true — before the slide-in animation
+    // starts — so the panel's first frame already has a valid blur behind it.
     var rightOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var rightCaptured by remember { mutableStateOf(false) }
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
@@ -129,6 +134,7 @@ fun HomeScreen(
                     raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
                 }
             } else if (!rightPanelVisible) {
+                // Wait for the 200ms slide-out animation before clearing
                 kotlinx.coroutines.delay(250)
                 rightCaptured = false
                 rightOneShotBitmap = null
@@ -138,6 +144,7 @@ fun HomeScreen(
 
     val repo = remember { ThemeDataStoreRepo(context) }
 
+    // 0: Books, 1: Notes, 2: Statistics
     var selectedNavTab by remember { mutableIntStateOf(0) }
     var isGridMode by remember { mutableStateOf(true) }
     var gridColumns by remember { mutableIntStateOf(2) }
@@ -150,11 +157,16 @@ fun HomeScreen(
     LaunchedEffect(pagerState.currentPage) {
         selectedNavTab = pagerState.currentPage
     }
-    LaunchedEffect(selectedNavTab) { fabExpanded = false }
+    // Collapse speed-dial whenever the user switches tabs
+    LaunchedEffect(selectedNavTab) {
+        fabExpanded = false
+    }
+    // Collapse speed-dial when the navigation drawer opens
     LaunchedEffect(drawerState.currentValue) {
         if (drawerState.currentValue == DrawerValue.Open) fabExpanded = false
     }
 
+    // Search state
     var isSearching by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
 
@@ -162,6 +174,7 @@ fun HomeScreen(
     val allNotes by vm.allNotes.observeAsState(emptyList())
     val allFolders by vm.allFolders.observeAsState(emptyList())
 
+    // Book stats computations
     val bookWordCounts = remember(allNotes, allBooks) {
         allBooks.associate { book ->
             book.id to allNotes.filter { it.bookId == book.id }.sumOf { n ->
@@ -180,13 +193,26 @@ fun HomeScreen(
         }
     }
 
+    // Dialog states
     var showCreateDialog by remember { mutableStateOf(false) }
     var bookToRename by remember { mutableStateOf<Book?>(null) }
     var bookToDelete by remember { mutableStateOf<Book?>(null) }
     var bookToChangeCover by remember { mutableStateOf<Book?>(null) }
 
+    // One-shot capture for dialogs on pre-API-31 devices.
+    //
+    // KEY FIX: FrostedDialog is an inline Box composable (not a system Dialog/Popup
+    // window), so it renders in the SAME recomposition frame that sets showXxx = true.
+    // LaunchedEffect fires AFTER layout+draw, meaning captureOnly was capturing the
+    // screen *after* the white dialog was already painted — blurring a white rectangle.
+    //
+    // Solution: capture BEFORE setting the show-flag. captureForDialog() runs the
+    // capture on the current coroutine (Main dispatcher via LaunchedEffect/scope.launch
+    // which both default to Main), stores the bitmap, then sets the flag so the dialog
+    // composable first renders with a valid blur behind it.
     var dialogOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
+    // Clears the bitmap when all dialogs close so the next open gets a fresh capture.
     val anyDialogOpen = showCreateDialog || bookToRename != null ||
             bookToDelete != null || bookToChangeCover != null
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
@@ -195,14 +221,18 @@ fun HomeScreen(
         }
     }
 
+    // Helper: capture → blur → store, then execute the lambda that opens the dialog.
+    // All of this happens before the dialog composable ever enters the tree.
     val captureForDialog: suspend (() -> Unit) -> Unit = { openDialog ->
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            // captureOnly uses view.rootView.draw() which requires the Main thread.
+            // scope.launch / LaunchedEffect both run on Main by default, so this is safe.
             val raw = BitmapBlur.captureOnly(view)
             dialogOneShotBitmap = withContext(Dispatchers.IO) {
                 raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
             }
         }
-        openDialog()
+        openDialog()   // NOW set the flag — dialog renders with bitmap already in place
     }
 
     val coverPickerLauncher = rememberLauncherForActivityResult(
@@ -228,10 +258,12 @@ fun HomeScreen(
             onHorizontalDrag = { change, dragAmount ->
                 totalX += dragAmount
                 val threshold = 36.dp.toPx()
+                // Left-edge swipe → open navigation drawer
                 if (drawerState.isClosed && startX < size.width * 0.3f && totalX > threshold) {
                     change.consume()
                     scope.launch { drawerState.open() }
                 }
+                // Right-edge swipe → open stats panel
                 if (!rightPanelVisible && startX > size.width * 0.72f && totalX < -threshold) {
                     change.consume()
                     rightPanelVisible = true
@@ -260,23 +292,33 @@ fun HomeScreen(
                 val rawAccentColor = drawerTheme?.let {
                     parseComposeColor(it.colors.accent, MaterialTheme.colorScheme.primary)
                 } ?: MaterialTheme.colorScheme.primary
-                val accentColor = adaptiveAccentColor(rawAccentColor, LocalSolidSurface.current, localHasBgImage())
+                val accentColor = adaptiveAccentColor(
+                    accent = rawAccentColor,
+                    solidSurface = LocalSolidSurface.current,
+                    hasBgImage = localHasBgImage(),
+                    savedBgLuminance = LocalAppTheme.current?.savedBgLuminance ?: -1f
+                )
                 val (adaptiveTextColor, adaptiveTextModifier) = rememberAdaptiveTextColor(
                     fallback = MaterialTheme.colorScheme.onSurface
                 )
                 val currentStreak by vm.currentStreak.collectAsState()
 
-                Spacer(modifier = Modifier.height(32.dp))
+                // ── HEADER: icon + wordmark + avatar + streak ──
+                Spacer(modifier = Modifier.height(28.dp))
+                // Row with fillMaxWidth reliably pins logo to start and avatar+streak
+                // to end inside ModalDrawerSheet, regardless of its internal Column alignment.
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp),
+                        .padding(horizontal = 20.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
+                    // Wordmark — two Icons share the same viewport so they overlap perfectly,
+                    // letting ic_scribe_s (the coloured S+quill) sit on top of ic_scribe_text.
                     Box(
                         modifier = Modifier
-                            .height(40.dp)
+                            .height(36.dp)
                             .wrapContentWidth()
                     ) {
                         Icon(
@@ -286,6 +328,7 @@ fun HomeScreen(
                             modifier = Modifier
                                 .fillMaxHeight()
                                 .aspectRatio(2048f / 922f)
+                                .then(adaptiveTextModifier) // required: without this, bounds stays Rect.Zero and the fallback live-analysis path always returns white
                         )
                         Icon(
                             painter = painterResource(R.drawable.ic_scribe_s),
@@ -296,10 +339,13 @@ fun HomeScreen(
                                 .aspectRatio(2048f / 922f)
                         )
                     }
-                    Column(horizontalAlignment = Alignment.End) {
+                    // Avatar + streak pinned to end
+                    Column(
+                        horizontalAlignment = Alignment.End
+                    ) {
                         Box(
                             modifier = Modifier
-                                .size(44.dp)
+                                .size(40.dp)
                                 .clip(CircleShape)
                                 .background(accentColor.copy(alpha = 0.15f)),
                             contentAlignment = Alignment.Center
@@ -307,44 +353,58 @@ fun HomeScreen(
                             Icon(
                                 Icons.Default.Person,
                                 contentDescription = null,
-                                modifier = Modifier.size(24.dp),
+                                modifier = Modifier.size(22.dp),
                                 tint = accentColor
                             )
                         }
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
                                 .background(accentColor.copy(alpha = 0.20f))
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
                             Text(
                                 text = "🔥 $currentStreak ${if (currentStreak == 1) "Day" else "Days"}",
                                 fontSize = 11.sp,
                                 color = accentColor,
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.Medium
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(28.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
+                // ── INNER CARD with nav items ──
                 val innerCardBg = if (hazeState != null) {
+                    // Frosted glass active: semi-transparent overlay
                     Color.White.copy(alpha = 0.07f)
                 } else {
+                    // No frosted glass: slightly lifted surface
                     MaterialTheme.colorScheme.surface.copy(alpha = 0.12f)
                 }
 
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                        .clip(RoundedCornerShape(20.dp))
+                        .padding(horizontal = 14.dp)
+                        .clip(RoundedCornerShape(18.dp))
                         .background(innerCardBg)
                 ) {
                     Column(modifier = Modifier.padding(vertical = 12.dp)) {
-                        DrawerLabel("NAVIGATION")
+
+                        // Section label: NAVIGATION
+                        Text(
+                            text = "NAVIGATION",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 1.5.sp,
+                            color = LocalContentColor.current.copy(alpha = 0.45f),
+                            modifier = Modifier.padding(start = 16.dp, bottom = 4.dp)
+                        )
+
+                        // World Sheets item
                         DrawerNavItem(
                             icon = Icons.Default.Map,
                             label = "World Sheets",
@@ -354,8 +414,20 @@ fun HomeScreen(
                                 onOpenSheets()
                             }
                         )
+
                         Spacer(modifier = Modifier.height(8.dp))
-                        DrawerLabel("TOOLS")
+
+                        // Section label: TOOLS
+                        Text(
+                            text = "TOOLS",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 1.5.sp,
+                            color = LocalContentColor.current.copy(alpha = 0.45f),
+                            modifier = Modifier.padding(start = 16.dp, bottom = 4.dp)
+                        )
+
+                        // Themes item
                         DrawerNavItem(
                             icon = Icons.Default.Palette,
                             label = "Themes",
@@ -365,6 +437,8 @@ fun HomeScreen(
                                 onOpenThemes()
                             }
                         )
+
+                        // Settings item
                         DrawerNavItem(
                             icon = Icons.Default.Settings,
                             label = "Settings",
@@ -376,15 +450,18 @@ fun HomeScreen(
                         )
                     }
                 }
-                }
             }
-            }
+                } // end FrostedPanelContent
+            } // end CompositionLocalProvider(LocalOneShotBitmap provides oneShotBitmap)
         }
     ) {
         Scaffold(
             containerColor = Color.Transparent,
             modifier = Modifier.then(swipeGestureModifier),
             topBar = {
+                // On API < 31 frostedBar needs LocalOneShotBitmap to be non-null.
+                // LocalBarBlurBitmap is provided by ScribeTheme from the Coil bitmap —
+                // no screen capture needed; already available when the image is loaded.
                 CompositionLocalProvider(LocalOneShotBitmap provides LocalBarBlurBitmap.current) {
                 FrostedBarContent {
                 TopAppBar(
@@ -409,8 +486,7 @@ fun HomeScreen(
                                 },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(52.dp),
-                                shape = RoundedCornerShape(16.dp)
+                                    .height(52.dp)
                             )
                         } else {
                             val (titleColor, titleModifier) = rememberAdaptiveTextColor(
@@ -420,8 +496,7 @@ fun HomeScreen(
                                 "Scribe",
                                 fontWeight = FontWeight.Bold,
                                 color = titleColor,
-                                modifier = titleModifier,
-                                style = MaterialTheme.typography.titleLarge
+                                modifier = titleModifier
                             )
                         }
                     },
@@ -455,16 +530,16 @@ fun HomeScreen(
                                     scope.launch { repo.setGridColumns(nextCols) }
                                 }) {
                                     Surface(
-                                        shape = RoundedCornerShape(8.dp),
+                                        shape = RoundedCornerShape(4.dp),
                                         color = MaterialTheme.colorScheme.primaryContainer,
                                         modifier = Modifier.padding(2.dp)
                                     ) {
                                         Text(
                                             text = "${gridColumns}C",
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 11.sp,
+                                            fontSize = 12.sp,
                                             color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                         )
                                     }
                                 }
@@ -482,12 +557,10 @@ fun HomeScreen(
                             DropdownMenu(
                                 expanded = showSortMenu,
                                 onDismissRequest = { showSortMenu = false },
-                                containerColor = LocalSolidSurface.current,
-                                shape = RoundedCornerShape(16.dp)
+                                containerColor = LocalSolidSurface.current
                             ) {
                                 DropdownMenuItem(
                                     text = { Text("Date Updated") },
-                                    leadingIcon = { Icon(Icons.Default.Update, contentDescription = null) },
                                     onClick = {
                                         vm.setSortMode(HomeViewModel.SortMode.DATE_UPDATED)
                                         showSortMenu = false
@@ -495,7 +568,6 @@ fun HomeScreen(
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Date Created") },
-                                    leadingIcon = { Icon(Icons.Default.CalendarToday, contentDescription = null) },
                                     onClick = {
                                         vm.setSortMode(HomeViewModel.SortMode.DATE_CREATED)
                                         showSortMenu = false
@@ -503,7 +575,6 @@ fun HomeScreen(
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Title (A-Z)") },
-                                    leadingIcon = { Icon(Icons.Default.SortByAlpha, contentDescription = null) },
                                     onClick = {
                                         vm.setSortMode(HomeViewModel.SortMode.TITLE_AZ)
                                         showSortMenu = false
@@ -513,8 +584,8 @@ fun HomeScreen(
                         }
                     }
                 )
-                }
-                }
+                } // end FrostedBarContent for topBar
+                } // end CompositionLocalProvider(LocalBarBlurBitmap for topBar)
             },
             bottomBar = {
                 CompositionLocalProvider(LocalOneShotBitmap provides LocalBarBlurBitmap.current) {
@@ -543,8 +614,7 @@ fun HomeScreen(
                         },
                         icon = { Icon(Icons.Default.Book, contentDescription = "Books") },
                         label = { Text("Books", fontSize = 10.sp) },
-                        colors = navColors,
-                        alwaysShowLabel = false
+                        colors = navColors
                     )
                     NavigationBarItem(
                         selected = selectedNavTab == 1 && !isSearching,
@@ -555,8 +625,7 @@ fun HomeScreen(
                         },
                         icon = { Icon(Icons.Default.StickyNote2, contentDescription = "Notes") },
                         label = { Text("Notes", fontSize = 10.sp) },
-                        colors = navColors,
-                        alwaysShowLabel = false
+                        colors = navColors
                     )
                     NavigationBarItem(
                         selected = selectedNavTab == 2 && !isSearching,
@@ -566,15 +635,16 @@ fun HomeScreen(
                             scope.launch { pagerState.animateScrollToPage(2) }
                         },
                         icon = { Icon(Icons.Default.BarChart, contentDescription = "Statistics") },
-                        label = { Text("Stats", fontSize = 10.sp) },
-                        colors = navColors,
-                        alwaysShowLabel = false
+                        label = { Text("Statistics", fontSize = 10.sp) },
+                        colors = navColors
                     )
                 }
-                }
-                }
+                } // end FrostedBarContent for bottomBar
+                } // end CompositionLocalProvider(LocalBarBlurBitmap for bottomBar)
             },
             floatingActionButton = {
+                // FAB is always visible — LocalBarBlurBitmap (derived from the Coil
+                // image in ScribeTheme) is already loaded, no screen capture needed.
                 CompositionLocalProvider(LocalOneShotBitmap provides LocalBarBlurBitmap.current) {
                 val fabTheme = LocalAppTheme.current
                 val accentClr = fabTheme?.let {
@@ -591,10 +661,12 @@ fun HomeScreen(
                 ) { tab ->
                     when (tab) {
                         0 -> {
+                            // ── Morph speed-dial FAB ──
                             AnimatedContent(
                                 targetState = fabExpanded,
                                 transitionSpec = {
                                     if (targetState) {
+                                        // Expanding → spring scale from bottom-right + fade in
                                         (scaleIn(
                                             animationSpec = spring(
                                                 dampingRatio = Spring.DampingRatioMediumBouncy,
@@ -607,6 +679,7 @@ fun HomeScreen(
                                             transformOrigin = TransformOrigin(1f, 1f)
                                         ) + fadeOut(tween(100)))
                                     } else {
+                                        // Collapsing → quick tween scale out + fade out
                                         (scaleIn(
                                             initialScale = 0.75f,
                                             transformOrigin = TransformOrigin(1f, 1f)
@@ -620,20 +693,22 @@ fun HomeScreen(
                                 label = "fabMorph"
                             ) { expanded ->
                                 if (expanded) {
+                                    // ── Speed-dial card ──
                                     var showItems by remember { mutableStateOf(false) }
                                     LaunchedEffect(Unit) { showItems = true }
 
                                     Surface(
-                                        shape = RoundedCornerShape(24.dp),
+                                        shape = RoundedCornerShape(20.dp),
                                         color = frostedContainerColor(
-                                            fallback = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+                                            fallback = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
                                         ),
                                         tonalElevation = 0.dp,
                                         modifier = Modifier
-                                            .width(210.dp)
-                                            .frostedFab(LocalHazeState.current, shape = RoundedCornerShape(24.dp))
+                                            .width(200.dp)
+                                            .frostedFab(LocalHazeState.current, shape = RoundedCornerShape(20.dp))
                                     ) {
                                         Column {
+                                            // Item 1 — New Book
                                             AnimatedVisibility(
                                                 visible = showItems,
                                                 enter = fadeIn(tween(150)) + slideInVertically(
@@ -650,28 +725,19 @@ fun HomeScreen(
                                                                 captureForDialog { showCreateDialog = true }
                                                             }
                                                         }
-                                                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                                                        .padding(horizontal = 16.dp, vertical = 14.dp),
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(32.dp)
-                                                            .clip(CircleShape)
-                                                            .background(accentClr.copy(alpha = 0.12f)),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Icon(
-                                                            Icons.Default.Add,
-                                                            contentDescription = "New Book",
-                                                            modifier = Modifier.size(18.dp),
-                                                            tint = accentClr
-                                                        )
-                                                    }
-                                                    Spacer(modifier = Modifier.width(12.dp))
+                                                    Icon(
+                                                        Icons.Default.Add,
+                                                        contentDescription = "New Book",
+                                                        modifier = Modifier.size(18.dp),
+                                                        tint = accentClr
+                                                    )
+                                                    Spacer(modifier = Modifier.width(10.dp))
                                                     Text(
                                                         "New Book",
                                                         fontSize = 15.sp,
-                                                        fontWeight = FontWeight.Medium,
                                                         color = MaterialTheme.colorScheme.onSurface
                                                     )
                                                 }
@@ -679,10 +745,10 @@ fun HomeScreen(
 
                                             HorizontalDivider(
                                                 thickness = 0.5.dp,
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
-                                                modifier = Modifier.padding(horizontal = 16.dp)
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
                                             )
 
+                                            // Item 2 — New Sheet (staggered 60ms)
                                             AnimatedVisibility(
                                                 visible = showItems,
                                                 enter = fadeIn(tween(150, delayMillis = 60)) +
@@ -701,28 +767,19 @@ fun HomeScreen(
                                                                     .putExtra(SheetsActivity.EXTRA_OPEN_CREATE, true)
                                                             )
                                                         }
-                                                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                                                        .padding(horizontal = 16.dp, vertical = 14.dp),
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(32.dp)
-                                                            .clip(CircleShape)
-                                                            .background(accentClr.copy(alpha = 0.12f)),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Icon(
-                                                            Icons.Outlined.Book,
-                                                            contentDescription = "New Sheet",
-                                                            modifier = Modifier.size(18.dp),
-                                                            tint = accentClr
-                                                        )
-                                                    }
-                                                    Spacer(modifier = Modifier.width(12.dp))
+                                                    Icon(
+                                                        Icons.Outlined.Book,
+                                                        contentDescription = "New Sheet",
+                                                        modifier = Modifier.size(18.dp),
+                                                        tint = accentClr
+                                                    )
+                                                    Spacer(modifier = Modifier.width(10.dp))
                                                     Text(
                                                         "New Sheet",
                                                         fontSize = 15.sp,
-                                                        fontWeight = FontWeight.Medium,
                                                         color = MaterialTheme.colorScheme.onSurface
                                                     )
                                                 }
@@ -730,12 +787,13 @@ fun HomeScreen(
                                         }
                                     }
                                 } else {
+                                    // ── Collapsed FAB ──
                                     FloatingActionButton(
                                         onClick = { fabExpanded = true },
                                         containerColor = frostedContainerColor(fallback = accentClr),
                                         contentColor = Color.White,
-                                        shape = RoundedCornerShape(20.dp),
-                                        modifier = Modifier.frostedFab(LocalHazeState.current, shape = RoundedCornerShape(20.dp))
+                                        shape = RoundedCornerShape(16.dp),
+                                        modifier = Modifier.frostedFab(LocalHazeState.current, shape = RoundedCornerShape(16.dp))
                                     ) {
                                         Icon(Icons.Default.Add, contentDescription = "New Book")
                                     }
@@ -753,16 +811,16 @@ fun HomeScreen(
                                 }
                             },
                             icon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                            text = { Text("Quick Note", fontWeight = FontWeight.SemiBold) },
+                            text = { Text("Quick Note") },
                             containerColor = frostedContainerColor(fallback = accentClr),
                             contentColor = Color.White,
-                            shape = RoundedCornerShape(20.dp),
-                            modifier = Modifier.frostedFab(LocalHazeState.current, shape = RoundedCornerShape(20.dp))
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.frostedFab(LocalHazeState.current, shape = RoundedCornerShape(16.dp))
                         )
                         else -> Box(Modifier)
                     }
                 }
-                }
+                } // end CompositionLocalProvider(LocalBarBlurBitmap for FAB)
             }
         ) { padding ->
             Box(
@@ -826,6 +884,7 @@ fun HomeScreen(
                     }
                 }
 
+                // ── FAB speed-dial scrim — fades in behind the card, above pager ──
                 AnimatedVisibility(
                     visible = fabExpanded && selectedNavTab == 0,
                     enter = fadeIn(tween(200)),
@@ -834,11 +893,12 @@ fun HomeScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.45f))
+                            .background(Color.Black.copy(alpha = 0.38f))
                             .clickable { fabExpanded = false }
                     )
                 }
 
+                // ── Right stats panel — swipe from right edge or tap Info button ──
                 AnimatedVisibility(
                     visible = rightPanelVisible,
                     enter = fadeIn(tween(180)),
@@ -847,7 +907,7 @@ fun HomeScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.45f))
+                            .background(Color.Black.copy(alpha = 0.38f))
                             .clickable { rightPanelVisible = false }
                     )
                 }
@@ -876,15 +936,15 @@ fun HomeScreen(
                             .fillMaxHeight()
                             .fillMaxWidth(0.72f)
                             .frostedPanel(hazeState)
-                            .padding(horizontal = 24.dp, vertical = 28.dp),
-                        verticalArrangement = Arrangement.spacedBy(20.dp)
+                            .padding(horizontal = 20.dp, vertical = 24.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("Overview", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                            Text("Overview", fontSize = 20.sp, fontWeight = FontWeight.Bold)
                             IconButton(onClick = { rightPanelVisible = false }) {
                                 Icon(Icons.Default.Close, contentDescription = "Close")
                             }
@@ -898,17 +958,16 @@ fun HomeScreen(
                         HorizontalDivider()
                         Text(
                             "Quick Actions",
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.outline,
-                            letterSpacing = 1.sp
+                            color = MaterialTheme.colorScheme.outline
                         )
                         TextButton(
                             onClick = { rightPanelVisible = false; onOpenSettings() },
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(10.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text("Settings")
                         }
                         TextButton(
@@ -916,30 +975,30 @@ fun HomeScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Icon(Icons.Default.Palette, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(10.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text("Themes")
                         }
                     }
-                    }
-                    }
+                    } // end FrostedPanelContent for right panel
+                    } // end CompositionLocalProvider(rightOneShotBitmap for right panel)
                 }
             }
         }
     }
 
+    // Dialogs
     if (showCreateDialog) {
         var newTitle by remember { mutableStateOf("") }
         FrostedDialog(
             onDismissRequest = { showCreateDialog = false },
-            title = { Text("New Book", fontWeight = FontWeight.Bold) },
+            title = { Text("New Book") },
             text = {
                 OutlinedTextField(
                     value = newTitle,
                     onValueChange = { newTitle = it },
                     label = { Text("Book Title") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp)
+                    modifier = Modifier.fillMaxWidth()
                 )
             },
             confirmButton = {
@@ -950,7 +1009,7 @@ fun HomeScreen(
                             vm.createBook(title) { showCreateDialog = false }
                         }
                     }
-                ) { Text("Create", fontWeight = FontWeight.SemiBold) }
+                ) { Text("Create") }
             },
             dismissButton = {
                 TextButton(onClick = { showCreateDialog = false }) { Text("Cancel") }
@@ -962,14 +1021,13 @@ fun HomeScreen(
         var renameText by remember { mutableStateOf(book.title) }
         FrostedDialog(
             onDismissRequest = { bookToRename = null },
-            title = { Text("Rename Book", fontWeight = FontWeight.Bold) },
+            title = { Text("Rename Book") },
             text = {
                 OutlinedTextField(
                     value = renameText,
                     onValueChange = { renameText = it },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp)
+                    modifier = Modifier.fillMaxWidth()
                 )
             },
             confirmButton = {
@@ -981,7 +1039,7 @@ fun HomeScreen(
                         }
                         bookToRename = null
                     }
-                ) { Text("Rename", fontWeight = FontWeight.SemiBold) }
+                ) { Text("Rename") }
             },
             dismissButton = {
                 TextButton(onClick = { bookToRename = null }) { Text("Cancel") }
@@ -992,7 +1050,7 @@ fun HomeScreen(
     bookToDelete?.let { book ->
         FrostedDialog(
             onDismissRequest = { bookToDelete = null },
-            title = { Text("Delete Book?", fontWeight = FontWeight.Bold) },
+            title = { Text("Delete Book?") },
             text = { Text("Are you sure you want to delete \"${book.title}\"? All notes in it will be lost.") },
             confirmButton = {
                 TextButton(
@@ -1000,26 +1058,14 @@ fun HomeScreen(
                         vm.deleteBook(book.id)
                         bookToDelete = null
                     }
-                ) { Text("Delete", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold) }
+                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
                 TextButton(onClick = { bookToDelete = null }) { Text("Cancel") }
             }
         )
     }
-    }
-}
-
-@Composable
-private fun DrawerLabel(text: String) {
-    Text(
-        text = text,
-        fontSize = 10.sp,
-        fontWeight = FontWeight.SemiBold,
-        letterSpacing = 1.5.sp,
-        color = LocalContentColor.current.copy(alpha = 0.45f),
-        modifier = Modifier.padding(start = 20.dp, bottom = 4.dp, top = 4.dp)
-    )
+    } // end CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap)
 }
 
 @Composable
@@ -1033,20 +1079,19 @@ private fun DrawerNavItem(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
-            modifier = Modifier.size(22.dp),
+            modifier = Modifier.size(20.dp),
             tint = accentColor
         )
         Spacer(modifier = Modifier.width(14.dp))
         Text(
             text = label,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Medium
+            fontSize = 15.sp
         )
     }
 }
@@ -1067,17 +1112,25 @@ private fun BooksTabContent(
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         if (books.isEmpty()) {
-            EmptyState(
-                icon = Icons.Outlined.MenuBook,
-                title = "No books yet",
-                subtitle = "Tap + to create your first book"
-            )
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Outlined.MenuBook,
+                        contentDescription = null,
+                        modifier = Modifier.size(64.dp),
+                        tint = MaterialTheme.colorScheme.outline
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("No books yet", fontSize = 18.sp, color = MaterialTheme.colorScheme.outline)
+                    Text("Tap + to create your first book", fontSize = 14.sp, color = MaterialTheme.colorScheme.outline)
+                }
+            }
         } else if (isGridMode) {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(gridColumns),
-                contentPadding = PaddingValues(20.dp),
-                horizontalArrangement = Arrangement.spacedBy(20.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp),
+                contentPadding = PaddingValues(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(books, key = { it.id }) { book ->
@@ -1094,8 +1147,8 @@ private fun BooksTabContent(
             }
         } else {
             LazyColumn(
-                contentPadding = PaddingValues(20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(books, key = { it.id }) { book ->
@@ -1119,40 +1172,6 @@ private fun BooksTabContent(
 }
 
 @Composable
-fun EmptyState(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String,
-    subtitle: String
-) {
-    val infiniteTransition = rememberInfiniteTransition(label = "emptyFloat")
-    val floatY by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = -8f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2500, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "emptyFloatY"
-    )
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                icon,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(80.dp)
-                    .graphicsLayer { translationY = floatY },
-                tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
-            )
-            Spacer(modifier = Modifier.height(20.dp))
-            Text(title, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.outline)
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(subtitle, fontSize = 14.sp, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f))
-        }
-    }
-}
-
-@Composable
 private fun BookGridCard(
     book: Book,
     words: Int,
@@ -1164,29 +1183,31 @@ private fun BookGridCard(
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
+    // ── Idle floating bob ────────────────────────────────────────────────
     val infiniteTransition = rememberInfiniteTransition(label = "float")
     val floatY by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = -6f,
+        targetValue = -5f,
         animationSpec = infiniteRepeatable(
-            animation = tween(2500, easing = FastOutSlowInEasing),
+            animation = tween(2200, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "floatY"
     )
 
+    // ── Press 3-D tilt ───────────────────────────────────────────────────
     var isPressed by remember { mutableStateOf(false) }
     var pressOffset by remember { mutableStateOf(Offset.Zero) }
 
     val targetRotX = if (isPressed) (pressOffset.y - 100f) * 0.04f else 0f
     val targetRotY = if (isPressed) -(pressOffset.x - 80f) * 0.04f else 0f
-    val targetScale = if (isPressed) 0.96f else 1f
-    val targetElev = if (isPressed) 2f else 16f
+    val targetScale = if (isPressed) 0.95f else 1f
+    val targetElev  = if (isPressed) 2f else 12f
 
-    val rotX by animateFloatAsState(targetRotX, spring(dampingRatio = Spring.DampingRatioMediumBouncy), label = "rotX")
-    val rotY by animateFloatAsState(targetRotY, spring(dampingRatio = Spring.DampingRatioMediumBouncy), label = "rotY")
+    val rotX  by animateFloatAsState(targetRotX,  spring(dampingRatio = Spring.DampingRatioMediumBouncy), label = "rotX")
+    val rotY  by animateFloatAsState(targetRotY,  spring(dampingRatio = Spring.DampingRatioMediumBouncy), label = "rotY")
     val scale by animateFloatAsState(targetScale, spring(dampingRatio = Spring.DampingRatioMediumBouncy), label = "scale")
-    val elev by animateFloatAsState(targetElev, tween(200), label = "elev")
+    val elev  by animateFloatAsState(targetElev,  tween(200), label = "elev")
 
     Column(
         modifier = Modifier
@@ -1204,25 +1225,32 @@ private fun BookGridCard(
             },
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // graphicsLayer is scoped to the cover Box only — floating bob, 3-D tilt,
+        // and shadow should not affect the title or stats text below.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .graphicsLayer {
-                    translationY = floatY
-                    scaleX = scale
-                    scaleY = scale
-                    rotationX = rotX
-                    rotationY = rotY
-                    cameraDistance = 10f * density
+                    translationY    = floatY
+                    scaleX          = scale
+                    scaleY          = scale
+                    rotationX       = rotX
+                    rotationY       = rotY
+                    cameraDistance  = 10f * density
                     shadowElevation = elev.dp.toPx()
                 }
                 .aspectRatio(0.72f)
-                .shadow(elev.dp, RoundedCornerShape(12.dp))
-                .clip(RoundedCornerShape(12.dp))
+                .shadow(elev.dp, RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(8.dp))
         ) {
             if (book.coverUri != null) {
                 val context = LocalContext.current
                 AsyncImage(
+                    // On API < 31, one-shot blur uses View.draw(softwareCanvas).
+                    // Hardware bitmaps (Coil's default) crash that call silently,
+                    // causing captureOnly to return null and frosted glass to fall back.
+                    // Use allowHardware(false) on pre-API-31 so the cover stays as a
+                    // software bitmap that the canvas capture can read correctly.
                     model = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
                         ImageRequest.Builder(context)
                             .data(book.coverUri)
@@ -1235,35 +1263,18 @@ private fun BookGridCard(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.5f)),
-                                startY = 200f
-                            )
-                        )
-                )
             } else {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(
-                            Brush.linearGradient(
-                                listOf(
-                                    MaterialTheme.colorScheme.primaryContainer,
-                                    MaterialTheme.colorScheme.secondaryContainer
-                                )
-                            )
-                        ),
+                        .background(MaterialTheme.colorScheme.primaryContainer),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         Icons.Outlined.Book,
                         contentDescription = null,
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                        modifier = Modifier.size(44.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
             }
@@ -1279,37 +1290,33 @@ private fun BookGridCard(
                 DropdownMenu(
                     expanded = showMenu,
                     onDismissRequest = { showMenu = false },
-                    containerColor = LocalSolidSurface.current,
-                    shape = RoundedCornerShape(16.dp)
+                    containerColor = LocalSolidSurface.current
                 ) {
                     DropdownMenuItem(text = { Text("Open") }, onClick = { showMenu = false; onOpen() })
                     DropdownMenuItem(text = { Text("Rename") }, onClick = { showMenu = false; onRename() })
                     DropdownMenuItem(text = { Text("Change Cover") }, onClick = { showMenu = false; onChangeCover() })
-                    DropdownMenuItem(
-                        text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                        onClick = { showMenu = false; onDelete() }
-                    )
+                    DropdownMenuItem(text = { Text("Delete") }, onClick = { showMenu = false; onDelete() })
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         Text(
             text = book.title,
-            fontSize = 14.sp,
+            fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp)
         )
 
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(2.dp))
 
         Text(
-            text = "$words words · $files files",
+            text = "$words words • $files files",
             fontSize = 11.sp,
             color = MaterialTheme.colorScheme.outline,
             textAlign = TextAlign.Center
@@ -1331,114 +1338,91 @@ private fun BookListRow(
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
-    ElevatedCard(
-        onClick = { onOpen() },
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
-        modifier = Modifier.fillMaxWidth()
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onOpen() },
+        shape = RoundedCornerShape(12.dp)
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(width = 56.dp, height = 80.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .shadow(4.dp, RoundedCornerShape(10.dp))
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                if (book.coverUri != null) {
-                    val context = LocalContext.current
-                    AsyncImage(
-                        model = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-                            ImageRequest.Builder(context)
-                                .data(book.coverUri)
-                                .allowHardware(false)
-                                .build()
-                        } else {
-                            book.coverUri
-                        },
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.linearGradient(
-                                    listOf(
-                                        MaterialTheme.colorScheme.primaryContainer,
-                                        MaterialTheme.colorScheme.secondaryContainer
-                                    )
-                                )
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Default.Book,
+                Box(
+                    modifier = Modifier
+                        .size(width = 56.dp, height = 80.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                ) {
+                    if (book.coverUri != null) {
+                        val context = LocalContext.current
+                        AsyncImage(
+                            model = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                                ImageRequest.Builder(context)
+                                    .data(book.coverUri)
+                                    .allowHardware(false)
+                                    .build()
+                            } else {
+                                book.coverUri
+                            },
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
                         )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Book,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(14.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(book.title, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Tt $words", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Icon(Icons.Default.Article, contentDescription = null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("$files", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("$folders", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+
+                Box {
+                    IconButton(onClick = { showMenu = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = null)
+                    }
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false },
+                        containerColor = LocalSolidSurface.current
+                    ) {
+                        DropdownMenuItem(text = { Text("Open") }, onClick = { showMenu = false; onOpen() })
+                        DropdownMenuItem(text = { Text("Rename") }, onClick = { showMenu = false; onRename(book) })
+                        DropdownMenuItem(text = { Text("Change Cover") }, onClick = { showMenu = false; onChangeCover(book) })
+                        DropdownMenuItem(text = { Text("Delete") }, onClick = { showMenu = false; onDelete(book) })
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.width(16.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(book.title, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    introSnippet,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    StatChip(Icons.Default.TextFields, "$words", MaterialTheme.colorScheme.primary)
-                    StatChip(Icons.Default.Article, "$files", MaterialTheme.colorScheme.onSurfaceVariant)
-                    StatChip(Icons.Default.FolderOpen, "$folders", MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-
-            Box {
-                IconButton(onClick = { showMenu = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = null)
-                }
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false },
-                    containerColor = LocalSolidSurface.current,
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    DropdownMenuItem(text = { Text("Open") }, onClick = { showMenu = false; onOpen() })
-                    DropdownMenuItem(text = { Text("Rename") }, onClick = { showMenu = false; onRename(book) })
-                    DropdownMenuItem(text = { Text("Change Cover") }, onClick = { showMenu = false; onChangeCover(book) })
-                    DropdownMenuItem(
-                        text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                        onClick = { showMenu = false; onDelete(book) }
-                    )
-                }
-            }
         }
-    }
-}
-
-@Composable
-private fun StatChip(icon: androidx.compose.ui.graphics.vector.ImageVector, value: String, tint: Color) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp)
-    ) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(14.dp), tint = tint.copy(alpha = 0.7f))
-        Text(value, fontSize = 12.sp, color = tint, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -1449,46 +1433,43 @@ private fun NotesTabContent(
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         if (allNotes.isEmpty()) {
-            EmptyState(
-                icon = Icons.Outlined.StickyNote2,
-                title = "No notes yet",
-                subtitle = "Tap + Quick Note to create one instantly"
-            )
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Outlined.StickyNote2,
+                        contentDescription = null,
+                        modifier = Modifier.size(64.dp),
+                        tint = MaterialTheme.colorScheme.outline
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("No notes yet", fontSize = 18.sp, color = MaterialTheme.colorScheme.outline)
+                    Text("Tap + Quick Note to create one instantly", fontSize = 14.sp, color = MaterialTheme.colorScheme.outline)
+                }
+            }
         } else {
             LazyColumn(
-                contentPadding = PaddingValues(20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(allNotes, key = { "notes_tab_${it.id}" }) { note ->
                     val wordCount = note.content.split("\\s+".toRegex()).count { it.isNotBlank() }
-                    ElevatedCard(
-                        onClick = { onOpenNote(note) },
-                        shape = RoundedCornerShape(16.dp),
-                        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
-                        modifier = Modifier.fillMaxWidth()
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpenNote(note) },
+                        shape = RoundedCornerShape(12.dp)
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
+                        Column(modifier = Modifier.padding(14.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(note.name, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer
-                                ) {
-                                    Text(
-                                        "$wordCount words",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
-                                }
+                                Text("$wordCount words", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                             }
-                            Spacer(modifier = Modifier.height(6.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = note.content.ifBlank { "Empty quick note..." },
                                 fontSize = 13.sp,
@@ -1528,19 +1509,19 @@ private fun SearchResultsView(
             }
         } else {
             LazyColumn(
-                contentPadding = PaddingValues(20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(matches, key = { "sr_${it.id}" }) { note ->
                     val bookTitle = allBooks.firstOrNull { it.id == note.bookId }?.title ?: "Vault"
-                    ElevatedCard(
-                        onClick = { onOpenNote(note) },
-                        shape = RoundedCornerShape(16.dp),
-                        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
-                        modifier = Modifier.fillMaxWidth()
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpenNote(note) },
+                        shape = RoundedCornerShape(10.dp)
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
+                        Column(modifier = Modifier.padding(14.dp)) {
                             Text(
                                 text = highlightMatch(note.name, query),
                                 fontWeight = FontWeight.Bold,
