@@ -110,16 +110,17 @@ fun HomeScreen(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             scope.launch { drawerState.open() }
         } else {
-            if (isPreparingDrawer || drawerState.isOpen) return@openDrawerWithBlur
-            isPreparingDrawer = true
-            scope.launch {
-                val raw = BitmapBlur.captureOnly(view)          // must stay on Main
-                val blurred = withContext(Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
+            if (!isPreparingDrawer && !drawerState.isOpen) {
+                isPreparingDrawer = true
+                scope.launch {
+                    val raw = BitmapBlur.captureOnly(view)          // must stay on Main
+                    val blurred = withContext(Dispatchers.IO) {
+                        raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
+                    }
+                    oneShotBitmap = blurred
+                    isPreparingDrawer = false
+                    drawerState.open()                               // animation starts only now
                 }
-                oneShotBitmap = blurred
-                isPreparingDrawer = false
-                drawerState.open()                               // animation starts only now
             }
         }
     }
@@ -144,16 +145,17 @@ fun HomeScreen(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             rightPanelVisible = true
         } else {
-            if (isPreparingRight || rightPanelVisible) return@openRightPanelWithBlur
-            isPreparingRight = true
-            scope.launch {
-                val raw = BitmapBlur.captureOnly(view)
-                val blurred = withContext(Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
+            if (!isPreparingRight && !rightPanelVisible) {
+                isPreparingRight = true
+                scope.launch {
+                    val raw = BitmapBlur.captureOnly(view)
+                    val blurred = withContext(Dispatchers.IO) {
+                        raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
+                    }
+                    rightOneShotBitmap = blurred
+                    isPreparingRight = false
+                    rightPanelVisible = true                         // animation starts only now
                 }
-                rightOneShotBitmap = blurred
-                isPreparingRight = false
-                rightPanelVisible = true                         // animation starts only now
             }
         }
     }
