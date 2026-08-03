@@ -818,6 +818,7 @@ fun ThemeEditScreen(
         Box(modifier = Modifier.fillMaxSize()) {
             ImageCropScreen(
                 imageUri = pendingCropUri!!,
+                themeId = themeId,
                 onConfirm = { croppedUri ->
                     bgOriginalUri = pendingCropUri  // preserve the full-res original
                     bgUri = croppedUri
@@ -1260,6 +1261,7 @@ private fun exportThemeJson(context: Context, theme: AppTheme) {
 @Composable
 private fun ImageCropScreen(
     imageUri: String,
+    themeId: String,
     onConfirm: (croppedUri: String) -> Unit,
     onCancel: () -> Unit
 ) {
