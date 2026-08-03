@@ -126,6 +126,10 @@ fun BookScreen(
     val viewMode by vm.viewMode.observeAsState(BookViewModel.ViewMode.LIST)
     val sortMode by vm.sortMode.observeAsState(BookViewModel.SortMode.DATE_UPDATED)
 
+    // ── Ongoing project state ─────────────────────────────────────────────────
+    val prefs = remember { (context.applicationContext as ScribeApp).prefs }
+    var ongoingBookId by remember { mutableStateOf(prefs.ongoingProjectBookId) }
+
     // Bottom Bar tab state inside BookScreen: 0: Write, 1: Statistics
     var selectedTab by remember { mutableIntStateOf(0) }
 
@@ -275,6 +279,55 @@ fun BookScreen(
                                     coverPickerLauncher.launch("image/*")
                                 }
                             )
+                            HorizontalDivider()
+                            // ── Ongoing project ───────────────────────────────
+                            val thisBookId = book?.id
+                            val isOngoing = thisBookId != null && ongoingBookId == thisBookId
+                            if (isOngoing) {
+                                DropdownMenuItem(
+                                    text = { Text("Remove from Ongoing Project") },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.BookmarkRemove,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.error
+                                        )
+                                    },
+                                    onClick = {
+                                        showSortMenu = false
+                                        prefs.ongoingProjectBookId = null
+                                        ongoingBookId = null
+                                    }
+                                )
+                            } else {
+                                DropdownMenuItem(
+                                    text = { Text("Set as Ongoing Project") },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.Bookmark,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    },
+                                    onClick = {
+                                        showSortMenu = false
+                                        if (thisBookId != null) {
+                                            prefs.ongoingProjectBookId = thisBookId
+                                            ongoingBookId = thisBookId
+                                            // Ensure Chapters folder exists in DB
+                                            scope.launch(Dispatchers.IO) {
+                                                val db = (context.applicationContext as ScribeApp).database
+                                                db.noteDao().insertFolder(
+                                                    com.primaloptima.scribe.data.Folder(
+                                                        bookId = thisBookId,
+                                                        path = "/Chapters"
+                                                    )
+                                                )
+                                            }
+                                        }
+                                    }
+                                )
+                            }
                             HorizontalDivider()
                             DropdownMenuItem(
                                 text = { Text("Sort by Date Updated") },

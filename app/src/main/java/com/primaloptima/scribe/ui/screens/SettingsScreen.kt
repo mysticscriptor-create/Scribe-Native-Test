@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,6 +49,7 @@ fun SettingsScreen(
     var autoHistoryMinWords by remember { mutableFloatStateOf(prefs.autoHistoryMinWords.toFloat()) }
 
     var showGoalDialog by remember { mutableStateOf(false) }
+    var homeStartPage by remember { mutableStateOf(prefs.homeStartPage) }
 
     Scaffold(
         contentWindowInsets = WindowInsets.systemBars,
@@ -70,6 +72,46 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // Home Section
+            Text("Home", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Card(shape = RoundedCornerShape(12.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Start on", fontWeight = FontWeight.Medium)
+                    Text(
+                        "Which screen opens when you launch Scribe.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = homeStartPage == "books",
+                            onClick = {
+                                homeStartPage = "books"
+                                prefs.homeStartPage = "books"
+                            },
+                            label = { Text("Books") },
+                            leadingIcon = if (homeStartPage == "books") {
+                                { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                            } else null
+                        )
+                        FilterChip(
+                            selected = homeStartPage == "dashboard",
+                            onClick = {
+                                homeStartPage = "dashboard"
+                                prefs.homeStartPage = "dashboard"
+                            },
+                            label = { Text("Dashboard") },
+                            leadingIcon = if (homeStartPage == "dashboard") {
+                                { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                            } else null
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider()
+
             // Appearance Section
             Text("Appearance", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Card(

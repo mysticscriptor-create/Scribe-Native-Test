@@ -72,10 +72,12 @@ import coil3.request.ImageRequest
 import coil3.request.allowHardware
 import com.primaloptima.scribe.*
 import com.primaloptima.scribe.R
+import com.primaloptima.scribe.ScribeApp
 import com.primaloptima.scribe.data.Book
 import com.primaloptima.scribe.data.Folder
 import com.primaloptima.scribe.data.Note
 import com.primaloptima.scribe.util.CoverUtils
+import com.primaloptima.scribe.util.PrefsManager
 import com.primaloptima.scribe.util.ThemeDataStoreRepo
 import com.primaloptima.scribe.viewmodel.HomeViewModel
 import kotlinx.coroutines.Dispatchers
@@ -88,6 +90,7 @@ import kotlinx.coroutines.withContext
 fun HomeScreen(
     vm: HomeViewModel,
     onOpenBook: (Book) -> Unit,
+    onOpenNote: (noteId: String, bookId: String) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenSheets: () -> Unit,
     onOpenThemes: () -> Unit
@@ -177,8 +180,10 @@ fun HomeScreen(
 
     val repo = remember { ThemeDataStoreRepo(context) }
 
-    // 0: Books, 1: Notes, 2: Statistics
-    var selectedNavTab by remember { mutableIntStateOf(0) }
+    // 0: Dashboard, 1: Books, 2: Notes, 3: Statistics
+    val prefs = remember { (context.applicationContext as ScribeApp).prefs }
+    val initialPage = remember { if (prefs.homeStartPage == "dashboard") 0 else 1 }
+    var selectedNavTab by remember { mutableIntStateOf(initialPage) }
     var isGridMode by remember { mutableStateOf(true) }
     var gridColumns by remember { mutableIntStateOf(2) }
 
@@ -186,7 +191,7 @@ fun HomeScreen(
         repo.gridColumnsFlow.collectLatest { gridColumns = it }
     }
 
-    val pagerState = rememberPagerState(initialPage = 0) { 3 }
+    val pagerState = rememberPagerState(initialPage = initialPage) { 4 }
     LaunchedEffect(pagerState.currentPage) {
         selectedNavTab = pagerState.currentPage
     }
@@ -546,7 +551,7 @@ fun HomeScreen(
                                 Icon(Icons.Default.Search, contentDescription = "Search")
                             }
                         }
-                        if (selectedNavTab == 0 && !isSearching) {
+                        if (selectedNavTab == 1 && !isSearching) {
                             if (isGridMode) {
                                 IconButton(onClick = {
                                     val nextCols = if (gridColumns == 2) 3 else 2
@@ -634,8 +639,8 @@ fun HomeScreen(
                             isSearching = false
                             scope.launch { pagerState.animateScrollToPage(0) }
                         },
-                        icon = { Icon(Icons.Default.Book, contentDescription = "Books") },
-                        label = { Text("Books", fontSize = 10.sp) },
+                        icon = { Icon(Icons.Default.Dashboard, contentDescription = "Dashboard") },
+                        label = { Text("Dashboard", fontSize = 10.sp) },
                         colors = navColors
                     )
                     NavigationBarItem(
@@ -645,8 +650,8 @@ fun HomeScreen(
                             isSearching = false
                             scope.launch { pagerState.animateScrollToPage(1) }
                         },
-                        icon = { Icon(Icons.Default.StickyNote2, contentDescription = "Notes") },
-                        label = { Text("Notes", fontSize = 10.sp) },
+                        icon = { Icon(Icons.Default.Book, contentDescription = "Books") },
+                        label = { Text("Books", fontSize = 10.sp) },
                         colors = navColors
                     )
                     NavigationBarItem(
@@ -655,6 +660,17 @@ fun HomeScreen(
                             selectedNavTab = 2
                             isSearching = false
                             scope.launch { pagerState.animateScrollToPage(2) }
+                        },
+                        icon = { Icon(Icons.Default.StickyNote2, contentDescription = "Notes") },
+                        label = { Text("Notes", fontSize = 10.sp) },
+                        colors = navColors
+                    )
+                    NavigationBarItem(
+                        selected = selectedNavTab == 3 && !isSearching,
+                        onClick = {
+                            selectedNavTab = 3
+                            isSearching = false
+                            scope.launch { pagerState.animateScrollToPage(3) }
                         },
                         icon = { Icon(Icons.Default.BarChart, contentDescription = "Statistics") },
                         label = { Text("Statistics", fontSize = 10.sp) },
@@ -679,7 +695,8 @@ fun HomeScreen(
                     label = "fabSwitch"
                 ) { tab ->
                     when (tab) {
-                        0 -> {
+                        0 -> Box(Modifier) // Dashboard — no FAB; actions live inside the screen
+                        1 -> {
                             // ── Morph speed-dial FAB ──
                             AnimatedContent(
                                 targetState = fabExpanded,
@@ -819,7 +836,7 @@ fun HomeScreen(
                                 }
                             }
                         }
-                        1 -> ExtendedFloatingActionButton(
+                        2 -> ExtendedFloatingActionButton(
                             onClick = {
                                 vm.createQuickNote { note ->
                                     context.startActivity(
@@ -868,7 +885,22 @@ fun HomeScreen(
                             .then(if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier)
                     ) { page ->
                         when (page) {
-                            0 -> BooksTabContent(
+                            0 -> DashboardTabContent(
+                                vm = vm,
+                                allBooks = allBooks,
+                                onOpenNote = onOpenNote,
+                                onOpenBook = onOpenBook,
+                                onGoToStats = {
+                                    selectedNavTab = 3
+                                    scope.launch { pagerState.animateScrollToPage(3) }
+                                },
+                                onGoToBooks = {
+                                    selectedNavTab = 1
+                                    scope.launch { pagerState.animateScrollToPage(1) }
+                                },
+                                onOpenSheets = onOpenSheets
+                            )
+                            1 -> BooksTabContent(
                                 books = vm.sortedBooks(allBooks),
                                 isGridMode = isGridMode,
                                 gridColumns = gridColumns,
@@ -884,7 +916,7 @@ fun HomeScreen(
                                 },
                                 onDelete = { book -> scope.launch { captureForDialog { bookToDelete = book } } }
                             )
-                            1 -> NotesTabContent(
+                            2 -> NotesTabContent(
                                 allNotes = allNotes,
                                 onOpenNote = { note ->
                                     context.startActivity(
@@ -894,7 +926,7 @@ fun HomeScreen(
                                     )
                                 }
                             )
-                            2 -> MainStatisticsTabContent(
+                            3 -> MainStatisticsTabContent(
                                 allBooks = allBooks,
                                 allNotes = allNotes,
                                 allFolders = allFolders
@@ -905,7 +937,7 @@ fun HomeScreen(
 
                 // ── FAB speed-dial scrim — fades in behind the card, above pager ──
                 AnimatedVisibility(
-                    visible = fabExpanded && selectedNavTab == 0,
+                    visible = fabExpanded && selectedNavTab == 1,
                     enter = fadeIn(tween(200)),
                     exit = fadeOut(tween(200))
                 ) {
