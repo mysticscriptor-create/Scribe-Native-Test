@@ -45,9 +45,12 @@ object BitmapBlur {
         )
         val blurred = stackBlur(small, r)
         small.recycle()
-        val result = Bitmap.createScaledBitmap(blurred, src.width, src.height, true)
+        val upscaled = Bitmap.createScaledBitmap(blurred, src.width, src.height, true)
         blurred.recycle()
-        return result
+        // Always apply the frosted glass finish (brightness lift + grain) so every
+        // caller — one-shot screen captures, bar bitmaps, card bitmaps — gets the
+        // same glassy quality without each call site having to remember to chain it.
+        return applyFrostedGlassLook(upscaled)
     }
 
     /**

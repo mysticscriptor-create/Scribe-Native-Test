@@ -114,6 +114,22 @@ val LocalBarBlurBitmap = compositionLocalOf<Bitmap?> { null }
  */
 val LocalSolidSurface = compositionLocalOf { Color.White }
 
+/**
+ * The resolved, adaptive accent color for the active theme.
+ *
+ * Computed once inside [ScribeComposeTheme] from [adaptiveAccentColor] with the
+ * real background luminance, then provided here so every screen reads a single
+ * consistent value instead of each calling parseComposeColor + adaptiveAccentColor
+ * independently.
+ *
+ * On plain-colour themes (no background image) this equals the raw accent from the
+ * theme JSON. On image themes it is shifted if necessary to maintain 3:1 contrast
+ * against the wallpaper luminance.
+ *
+ * Usage: val accent = LocalAccentColor.current
+ */
+val LocalAccentColor = compositionLocalOf { Color.Unspecified }
+
 fun autoTextColor(bg: Color): Color {
     val luminance = bg.luminance()
     return if (luminance > 0.5f) Color.Black else Color.White
@@ -899,7 +915,7 @@ fun ScribeComposeTheme(
                 bmp?.let {
                     val radiusPx = (blurIntensity * 0.8f).toInt().coerceIn(1, 25)
                     com.primaloptima.scribe.util.BitmapBlur.blurBitmap(it, radiusPx)
-                        .let { b -> com.primaloptima.scribe.util.BitmapBlur.applyFrostedGlassLook(b) }
+                    // applyFrostedGlassLook is now called inside blurBitmap — no chain needed here.
                 }
             } catch (_: Exception) { null }
         }
@@ -951,9 +967,9 @@ fun ScribeComposeTheme(
                     softwareBlurredModel
 
                 // image mode: blur the sharp image now
+                // applyFrostedGlassLook is now called inside blurBitmap — no chain needed.
                 bgMode == "image" && softwareImageModel != null ->
                     com.primaloptima.scribe.util.BitmapBlur.blurBitmap(softwareImageModel!!, radius = frostedBlurRadius.toInt().coerceIn(1, 25))
-                        .let { b -> com.primaloptima.scribe.util.BitmapBlur.applyFrostedGlassLook(b) }
 
                 // fallback: load fresh at screen aspect ratio (rare cold-start race)
                 hasBgImage && bgUri != null -> {
@@ -967,7 +983,8 @@ fun ScribeComposeTheme(
                         val bmp = (loader.execute(req) as? coil3.request.SuccessResult)
                             ?.image
                             ?.let { (it as? coil3.BitmapImage)?.bitmap }
-                        bmp?.let { com.primaloptima.scribe.util.BitmapBlur.blurBitmap(it, radius = frostedBlurRadius.toInt().coerceIn(1, 25)).let { b -> com.primaloptima.scribe.util.BitmapBlur.applyFrostedGlassLook(b) } }
+                        // applyFrostedGlassLook is now called inside blurBitmap — no chain needed.
+                        bmp?.let { com.primaloptima.scribe.util.BitmapBlur.blurBitmap(it, radius = frostedBlurRadius.toInt().coerceIn(1, 25)) }
                     } catch (_: Exception) { null }
                 }
 
@@ -989,6 +1006,9 @@ fun ScribeComposeTheme(
                 LocalFrostedBlurRadius provides frostedBlurRadius,
                 LocalSolidSurface provides animSurface,
                 LocalBarBlurBitmap provides barBlurBitmap,
+                // Adaptive accent resolved once here — screens read LocalAccentColor.current
+                // instead of calling parseComposeColor + adaptiveAccentColor themselves.
+                LocalAccentColor provides accentIcons,
                 // One-shot bitmap starts null; screens set it via their own
                 // CompositionLocalProvider wrapping the drawer/dialog content.
                 LocalOneShotBitmap provides null
