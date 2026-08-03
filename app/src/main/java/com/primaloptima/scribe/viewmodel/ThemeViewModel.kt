@@ -6,6 +6,7 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import com.primaloptima.scribe.ScribeApp
+import com.primaloptima.scribe.util.SAFHelper
 import com.primaloptima.scribe.util.ThemeDataStoreRepo
 import com.primaloptima.scribe.util.model.AppTheme
 import kotlinx.coroutines.flow.collectLatest
@@ -69,12 +70,44 @@ class ThemeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val json = (getApplication() as ScribeApp).prefs.customThemesJson
             dataStoreRepo.setCustomThemesJson(json)
+            // Wipe the theme's private image folder so nothing accumulates on disk.
+            // deleteThemeImageFolder is a fast synchronous file operation — fine on IO.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                SAFHelper.deleteThemeImageFolder(getApplication(), id)
+            }
         }
         reload()
     }
 
     fun duplicate(id: String): AppTheme? {
+        val source = themeManager.allThemes().firstOrNull { it.id == id } ?: return null
         val copy = themeManager.duplicateTheme(id) ?: return null
+        viewModelScope.launch {
+            // If the source theme has images, copy them into the duplicate's own folder
+            // so the two themes are completely independent on disk. We also rewrite the
+            // URI fields in the saved copy to point at the new folder, not the source's.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val hadImages = SAFHelper.copyThemeImageFolder(getApplication(), id, copy.id)
+                if (hadImages) {
+                    // Rewrite bgImageUri and bgOriginalUri to the new folder path
+                    val newDir = java.io.File(getApplication<android.app.Application>().filesDir, "bg_images/${copy.id}")
+                    fun remapUri(oldUri: String?): String? {
+                        if (oldUri.isNullOrEmpty()) return oldUri
+                        val oldFile = android.net.Uri.parse(oldUri).path?.let { java.io.File(it) } ?: return oldUri
+                        val newFile = java.io.File(newDir, oldFile.name)
+                        return if (newFile.exists()) android.net.Uri.fromFile(newFile).toString() else oldUri
+                    }
+                    val updated = copy.copy(
+                        backgroundImageUri = remapUri(copy.backgroundImageUri),
+                        backgroundImageOriginalUri = remapUri(copy.backgroundImageOriginalUri)
+                    )
+                    themeManager.saveCustomTheme(updated)
+                    val json = (getApplication() as ScribeApp).prefs.customThemesJson
+                    dataStoreRepo.setCustomThemesJson(json)
+                }
+            }
+            reload()
+        }
         reload()
         return copy
     }
