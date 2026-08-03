@@ -1119,7 +1119,7 @@ private fun BooksTabContent(
 }
 
 @Composable
-private fun EmptyState(
+fun EmptyState(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
     subtitle: String
