@@ -1297,6 +1297,37 @@ fun MainEditorScreen(
                                     val hasBgImage = !activeTheme?.backgroundImageUri.isNullOrEmpty()
 
                                     Box(modifier = Modifier.fillMaxSize()) {
+                                    // Gesture wrapper: AndroidView is a child so PointerEventPass.Initial
+                                    // fires here BEFORE the editor sees the touch. Double-taps are
+                                    // consumed (blocking the editor); single taps pass through normally.
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .pointerInput(Unit) {
+                                                val doubleTapTimeout = viewConfiguration.doubleTapTimeoutMillis
+                                                val doubleTapMinTime = viewConfiguration.doubleTapMinTimeMillis
+                                                awaitPointerEventScope {
+                                                    var lastTapTime = 0L
+                                                    while (true) {
+                                                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                                                        val down = event.changes.firstOrNull() ?: continue
+                                                        if (down.pressed && !down.previousPressed) {
+                                                            val now = System.currentTimeMillis()
+                                                            val diff = now - lastTapTime
+                                                            if (diff in doubleTapMinTime..doubleTapTimeout) {
+                                                                // Double tap — consume and toggle zen
+                                                                down.consume()
+                                                                editorVm.toggleZen()
+                                                                lastTapTime = 0L
+                                                            } else {
+                                                                // Single tap — don't consume, let it reach the editor
+                                                                lastTapTime = now
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                    ) {
                                     AndroidView(
                                         factory = { ctx ->
                                             ScrollView(ctx).apply {
@@ -1350,36 +1381,7 @@ fun MainEditorScreen(
                                         },
                                         modifier = Modifier.fillMaxSize()
                                     )
-                                    // Transparent overlay that only intercepts double-taps
-                                    // (single taps fall through to the editor underneath)
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .pointerInput(Unit) {
-                                                val doubleTapTimeout = viewConfiguration.doubleTapTimeoutMillis
-                                                val doubleTapMinTime = viewConfiguration.doubleTapMinTimeMillis
-                                                awaitPointerEventScope {
-                                                    var lastTapTime = 0L
-                                                    while (true) {
-                                                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                                                        val down = event.changes.firstOrNull() ?: continue
-                                                        if (down.pressed && !down.previousPressed) {
-                                                            val now = System.currentTimeMillis()
-                                                            val diff = now - lastTapTime
-                                                            if (diff in doubleTapMinTime..doubleTapTimeout) {
-                                                                // Double tap — consume and toggle zen
-                                                                down.consume()
-                                                                editorVm.toggleZen()
-                                                                lastTapTime = 0L
-                                                            } else {
-                                                                // Single tap — don't consume, let it reach the editor
-                                                                lastTapTime = now
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                    )
+                                    } // end gesture-detection Box
 
                                 // Floating Word Count Pill + Zen FAB — always visible,
                                 // so use barBlurBitmap (not dialogOneShotBitmap).
