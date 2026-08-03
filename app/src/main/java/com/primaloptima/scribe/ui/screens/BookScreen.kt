@@ -8,11 +8,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.animation.*
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.*
-import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -26,7 +22,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Alignment
@@ -75,12 +70,14 @@ fun BookScreen(
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
+    // One-shot blurred capture for pre-API-31 frosted glass (FABs + dialogs)
     val view = LocalView.current
     val blurRadiusPx = com.primaloptima.scribe.ui.theme.LocalFrostedBlurRadius.current.toInt().coerceIn(1, 25)
     var oneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var captured by remember { mutableStateOf(false) }
     var isFabExpanded by remember { mutableStateOf(false) }
 
+    // Dialog states declared early so captureForDialog can reference them
     var showCreateNoteDialog by remember { mutableStateOf(false) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
     var noteToRename by remember { mutableStateOf<Note?>(null) }
@@ -88,13 +85,16 @@ fun BookScreen(
 
     var dialogOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
+    // Clear dialog bitmap when all dialogs close.
     val anyDialogOpen = showCreateNoteDialog || showCreateFolderDialog ||
             noteToRename != null || noteToDelete != null
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        // FAB expanded: capture before the sub-FABs animate in (they are inline
+        // composables so they render the same frame isFabExpanded becomes true).
         LaunchedEffect(isFabExpanded) {
             if (isFabExpanded && !captured) {
                 captured = true
-                val raw = BitmapBlur.captureOnly(view)
+                val raw = BitmapBlur.captureOnly(view)  // Main thread (LaunchedEffect default)
                 oneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
                 }
@@ -108,6 +108,8 @@ fun BookScreen(
         }
     }
 
+    // KEY FIX: capture BEFORE setting the show flag so FrostedDialog's first
+    // composition already has a valid blur bitmap behind it.
     val captureForDialog: suspend (() -> Unit) -> Unit = { openDialog ->
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             val raw = BitmapBlur.captureOnly(view)
@@ -124,7 +126,10 @@ fun BookScreen(
     val viewMode by vm.viewMode.observeAsState(BookViewModel.ViewMode.LIST)
     val sortMode by vm.sortMode.observeAsState(BookViewModel.SortMode.DATE_UPDATED)
 
+    // Bottom Bar tab state inside BookScreen: 0: Write, 1: Statistics
     var selectedTab by remember { mutableIntStateOf(0) }
+
+    // (dialog state vars declared above near capture block)
     var selectedFolderPath by remember { mutableStateOf("/") }
 
     val coverPickerLauncher = rememberLauncherForActivityResult(
@@ -164,13 +169,11 @@ fun BookScreen(
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
-            ModalDrawerSheet(
-                drawerContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
-            ) {
-                Spacer(modifier = Modifier.height(28.dp))
+            ModalDrawerSheet {
+                Spacer(modifier = Modifier.height(24.dp))
                 Text(
                     text = book?.title ?: "Book Folders",
-                    fontSize = 22.sp,
+                    fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
                 )
@@ -178,41 +181,38 @@ fun BookScreen(
 
                 NavigationDrawerItem(
                     icon = { Icon(Icons.Default.Folder, contentDescription = null) },
-                    label = { Text("Main", fontWeight = FontWeight.Medium) },
+                    label = { Text("Main") },
                     selected = selectedFolderPath == "/",
                     onClick = {
                         selectedFolderPath = "/"
                         scope.launch { drawerState.close() }
                     },
-                    modifier = Modifier.padding(horizontal = 12.dp),
-                    shape = RoundedCornerShape(12.dp)
+                    modifier = Modifier.padding(horizontal = 12.dp)
                 )
 
                 folders.filter { it.path != "/" }.forEach { folder ->
                     NavigationDrawerItem(
                         icon = { Icon(Icons.Default.FolderOpen, contentDescription = null) },
-                        label = { Text(folder.path, fontWeight = FontWeight.Medium) },
+                        label = { Text(folder.path) },
                         selected = selectedFolderPath == folder.path,
                         onClick = {
                             selectedFolderPath = folder.path
                             scope.launch { drawerState.close() }
                         },
-                        modifier = Modifier.padding(horizontal = 12.dp),
-                        shape = RoundedCornerShape(12.dp)
+                        modifier = Modifier.padding(horizontal = 12.dp)
                     )
                 }
 
                 Spacer(modifier = Modifier.weight(1f))
-                ElevatedButton(
+                TextButton(
                     onClick = { scope.launch { captureForDialog { showCreateFolderDialog = true } } },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(20.dp),
-                    shape = RoundedCornerShape(14.dp)
+                        .padding(16.dp)
                 ) {
                     Icon(Icons.Default.CreateNewFolder, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("New Folder", fontWeight = FontWeight.SemiBold)
+                    Text("New Folder")
                 }
             }
         }
@@ -236,8 +236,7 @@ fun BookScreen(
                                 book?.title ?: "Book",
                                 fontWeight = FontWeight.Bold,
                                 color = titleColor,
-                                modifier = titleModifier,
-                                style = MaterialTheme.typography.titleLarge
+                                modifier = titleModifier
                             )
                             if (selectedFolderPath != "/") {
                                 Text("Folder: $selectedFolderPath", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
@@ -253,6 +252,7 @@ fun BookScreen(
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
                             Icon(Icons.Default.Folder, contentDescription = "Folders")
                         }
+                        // Toggle between Tab Mode and Tree Mode
                         IconButton(onClick = { vm.toggleViewMode() }) {
                             Icon(
                                 if (viewMode == BookViewModel.ViewMode.LIST) Icons.Default.ViewStream else Icons.Default.AccountTree,
@@ -266,12 +266,10 @@ fun BookScreen(
                         DropdownMenu(
                             expanded = showSortMenu,
                             onDismissRequest = { showSortMenu = false },
-                            containerColor = LocalSolidSurface.current,
-                            shape = RoundedCornerShape(16.dp)
+                            containerColor = LocalSolidSurface.current
                         ) {
                             DropdownMenuItem(
                                 text = { Text("Change Book Cover") },
-                                leadingIcon = { Icon(Icons.Default.Image, contentDescription = null) },
                                 onClick = {
                                     showSortMenu = false
                                     coverPickerLauncher.launch("image/*")
@@ -279,24 +277,21 @@ fun BookScreen(
                             )
                             HorizontalDivider()
                             DropdownMenuItem(
-                                text = { Text("Date Updated") },
-                                leadingIcon = { Icon(Icons.Default.Update, contentDescription = null) },
+                                text = { Text("Sort by Date Updated") },
                                 onClick = {
                                     vm.setSortMode(BookViewModel.SortMode.DATE_UPDATED)
                                     showSortMenu = false
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("Date Created") },
-                                leadingIcon = { Icon(Icons.Default.CalendarToday, contentDescription = null) },
+                                text = { Text("Sort by Date Created") },
                                 onClick = {
                                     vm.setSortMode(BookViewModel.SortMode.DATE_CREATED)
                                     showSortMenu = false
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("Title (A-Z)") },
-                                leadingIcon = { Icon(Icons.Default.SortByAlpha, contentDescription = null) },
+                                text = { Text("Sort by Title (A-Z)") },
                                 onClick = {
                                     vm.setSortMode(BookViewModel.SortMode.TITLE_AZ)
                                     showSortMenu = false
@@ -315,15 +310,13 @@ fun BookScreen(
                         selected = selectedTab == 0,
                         onClick = { selectedTab = 0 },
                         icon = { Icon(Icons.Default.EditNote, contentDescription = "Write") },
-                        label = { Text("Write", fontSize = 10.sp) },
-                        alwaysShowLabel = false
+                        label = { Text("Write") }
                     )
                     NavigationBarItem(
                         selected = selectedTab == 1,
                         onClick = { selectedTab = 1 },
                         icon = { Icon(Icons.Default.BarChart, contentDescription = "Statistics") },
-                        label = { Text("Statistics", fontSize = 10.sp) },
-                        alwaysShowLabel = false
+                        label = { Text("Statistics") }
                     )
                 }
             },
@@ -331,45 +324,96 @@ fun BookScreen(
                 if (selectedTab == 0) {
                     Column(
                         horizontalAlignment = Alignment.End,
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         AnimatedVisibility(
                             visible = isFabExpanded,
-                            enter = fadeIn(tween(150)) + expandVertically(expandFrom = Alignment.Bottom),
-                            exit = fadeOut(tween(150)) + shrinkVertically(shrinkTowards = Alignment.Bottom)
+                            enter = fadeIn() + expandVertically(),
+                            exit = fadeOut() + shrinkVertically()
                         ) {
                             Column(
                                 horizontalAlignment = Alignment.End,
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                MiniFabItem(
-                                    label = "Text Note",
-                                    icon = Icons.Default.Description,
-                                    onClick = {
-                                        isFabExpanded = false
-                                        scope.launch { captureForDialog { showCreateNoteDialog = true } }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        tonalElevation = 4.dp
+                                    ) {
+                                        Text(
+                                            "Text",
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
-                                )
-                                MiniFabItem(
-                                    label = "Folder",
-                                    icon = Icons.Default.CreateNewFolder,
-                                    onClick = {
-                                        isFabExpanded = false
-                                        scope.launch { captureForDialog { showCreateFolderDialog = true } }
+                                    SmallFloatingActionButton(
+                                        onClick = {
+                                            isFabExpanded = false
+                                            scope.launch { captureForDialog { showCreateNoteDialog = true } }
+                                        },
+                                        shape = CircleShape,
+                                        containerColor = frostedContainerColor(
+                                            fallback = MaterialTheme.colorScheme.primary
+                                        ),
+                                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                                        elevation = FloatingActionButtonDefaults.elevation(
+                                            defaultElevation = 0.dp,
+                                            pressedElevation = 0.dp
+                                        ),
+                                        modifier = Modifier.frostedFab(LocalHazeState.current)
+                                    ) {
+                                        Icon(Icons.Default.Description, contentDescription = "New Text File")
                                     }
-                                )
+                                }
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        tonalElevation = 4.dp
+                                    ) {
+                                        Text(
+                                            "Folder",
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    SmallFloatingActionButton(
+                                        onClick = {
+                                            isFabExpanded = false
+                                            scope.launch { captureForDialog { showCreateFolderDialog = true } }
+                                        },
+                                        shape = CircleShape,
+                                        containerColor = frostedContainerColor(
+                                            fallback = MaterialTheme.colorScheme.primary
+                                        ),
+                                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                                        elevation = FloatingActionButtonDefaults.elevation(
+                                            defaultElevation = 0.dp,
+                                            pressedElevation = 0.dp
+                                        ),
+                                        modifier = Modifier.frostedFab(LocalHazeState.current)
+                                    ) {
+                                        Icon(Icons.Default.CreateNewFolder, contentDescription = "New Folder")
+                                    }
+                                }
                             }
                         }
 
-                        val rotation by animateFloatAsState(
-                            targetValue = if (isFabExpanded) 45f else 0f,
-                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
-                            label = "fabRotate"
-                        )
+                        val rotation by animateFloatAsState(targetValue = if (isFabExpanded) 45f else 0f)
 
                         FloatingActionButton(
                             onClick = { isFabExpanded = !isFabExpanded },
-                            shape = RoundedCornerShape(20.dp),
+                            shape = CircleShape,
                             containerColor = frostedContainerColor(
                                 fallback = MaterialTheme.colorScheme.primary
                             ),
@@ -378,7 +422,7 @@ fun BookScreen(
                                 defaultElevation = 0.dp,
                                 pressedElevation = 0.dp
                             ),
-                            modifier = Modifier.frostedFab(LocalHazeState.current, shape = RoundedCornerShape(20.dp))
+                            modifier = Modifier.frostedFab(LocalHazeState.current)
                         ) {
                             Icon(
                                 Icons.Default.Add,
@@ -407,6 +451,7 @@ fun BookScreen(
                     }
 
                     if (viewMode == BookViewModel.ViewMode.LIST) {
+                        // TAB MODE using HorizontalPager & ScrollableTabRow
                         val pagerState = rememberPagerState(pageCount = { allFolderPaths.size })
 
                         LaunchedEffect(pagerState.currentPage) {
@@ -416,17 +461,7 @@ fun BookScreen(
                         Column(modifier = Modifier.fillMaxSize()) {
                             ScrollableTabRow(
                                 selectedTabIndex = pagerState.currentPage,
-                                edgePadding = 20.dp,
-                                containerColor = Color.Transparent,
-                                indicator = { tabPositions ->
-                                    if (tabPositions.isNotEmpty()) {
-                                        TabRowDefaults.SecondaryIndicator(
-                                            modifier = Modifier.tabIndicatorOffset(tabPositions[pagerState.currentPage]),
-                                            height = 3.dp,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                }
+                                edgePadding = 16.dp
                             ) {
                                 allFolderPaths.forEachIndexed { index, path ->
                                     val label = if (path == "/") "Main" else path.removePrefix("/")
@@ -435,13 +470,7 @@ fun BookScreen(
                                         onClick = {
                                             scope.launch { pagerState.animateScrollToPage(index) }
                                         },
-                                        text = {
-                                            Text(
-                                                label,
-                                                fontWeight = if (pagerState.currentPage == index) FontWeight.Bold else FontWeight.Medium,
-                                                fontSize = 13.sp
-                                            )
-                                        }
+                                        text = { Text(label, fontWeight = FontWeight.Bold) }
                                     )
                                 }
                             }
@@ -454,16 +483,30 @@ fun BookScreen(
                                 val pageNotes = notes.filter { it.folderPath == currentPath }
 
                                 if (pageNotes.isEmpty()) {
-                                    val displayPathName = if (currentPath == "/") "Main" else currentPath
-                                    EmptyState(
-                                        icon = Icons.Outlined.Description,
-                                        title = "No notes in $displayPathName",
-                                        subtitle = "Tap + to create a new note"
-                                    )
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Icon(
+                                                Icons.Outlined.Description,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(64.dp),
+                                                tint = MaterialTheme.colorScheme.outline
+                                            )
+                                            Spacer(modifier = Modifier.height(16.dp))
+                                            val displayPathName = if (currentPath == "/") "Main" else currentPath
+                                            Text(
+                                                "No notes in $displayPathName",
+                                                fontSize = 16.sp,
+                                                color = MaterialTheme.colorScheme.outline
+                                            )
+                                        }
+                                    }
                                 } else {
                                     LazyColumn(
-                                        contentPadding = PaddingValues(16.dp),
-                                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                                        contentPadding = PaddingValues(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
                                         modifier = Modifier.fillMaxSize()
                                     ) {
                                         items(pageNotes, key = { note -> "${sortMode}_${note.id}" }) { note ->
@@ -494,6 +537,7 @@ fun BookScreen(
                             }
                         }
                     } else {
+                        // TREE MODE: Expandable/Collapsible tree
                         TreeModeView(
                             notes = notes,
                             folders = folders,
@@ -524,20 +568,22 @@ fun BookScreen(
         }
     }
 
+    // Dialogs — wrapped in their own provider so dialogOneShotBitmap (not the FAB
+    // bitmap) is used, preventing the FAB collapse from clearing the blur before
+    // the dialog renders on Android 10.
     CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap) {
     if (showCreateNoteDialog) {
         var noteTitle by remember { mutableStateOf("") }
         FrostedDialog(
             onDismissRequest = { showCreateNoteDialog = false },
-            title = { Text("New Note", fontWeight = FontWeight.Bold) },
+            title = { Text("New Note") },
             text = {
                 OutlinedTextField(
                     value = noteTitle,
                     onValueChange = { noteTitle = it },
                     label = { Text("Note Title") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp)
+                    modifier = Modifier.fillMaxWidth()
                 )
             },
             confirmButton = {
@@ -555,7 +601,7 @@ fun BookScreen(
                             }
                         }
                     }
-                ) { Text("Create", fontWeight = FontWeight.SemiBold) }
+                ) { Text("Create") }
             },
             dismissButton = {
                 TextButton(onClick = { showCreateNoteDialog = false }) { Text("Cancel") }
@@ -567,15 +613,14 @@ fun BookScreen(
         var folderName by remember { mutableStateOf("") }
         FrostedDialog(
             onDismissRequest = { showCreateFolderDialog = false },
-            title = { Text("New Folder", fontWeight = FontWeight.Bold) },
+            title = { Text("New Folder") },
             text = {
                 OutlinedTextField(
                     value = folderName,
                     onValueChange = { folderName = it },
                     label = { Text("Folder Name (e.g. Chapter 1)") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp)
+                    modifier = Modifier.fillMaxWidth()
                 )
             },
             confirmButton = {
@@ -588,7 +633,7 @@ fun BookScreen(
                             showCreateFolderDialog = false
                         }
                     }
-                ) { Text("Create", fontWeight = FontWeight.SemiBold) }
+                ) { Text("Create") }
             },
             dismissButton = {
                 TextButton(onClick = { showCreateFolderDialog = false }) { Text("Cancel") }
@@ -600,14 +645,13 @@ fun BookScreen(
         var renameText by remember { mutableStateOf(note.name) }
         FrostedDialog(
             onDismissRequest = { noteToRename = null },
-            title = { Text("Rename Note", fontWeight = FontWeight.Bold) },
+            title = { Text("Rename Note") },
             text = {
                 OutlinedTextField(
                     value = renameText,
                     onValueChange = { renameText = it },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp)
+                    modifier = Modifier.fillMaxWidth()
                 )
             },
             confirmButton = {
@@ -619,7 +663,7 @@ fun BookScreen(
                         }
                         noteToRename = null
                     }
-                ) { Text("Rename", fontWeight = FontWeight.SemiBold) }
+                ) { Text("Rename") }
             },
             dismissButton = {
                 TextButton(onClick = { noteToRename = null }) { Text("Cancel") }
@@ -630,7 +674,7 @@ fun BookScreen(
     noteToDelete?.let { note ->
         FrostedDialog(
             onDismissRequest = { noteToDelete = null },
-            title = { Text("Delete Note?", fontWeight = FontWeight.Bold) },
+            title = { Text("Delete Note?") },
             text = { Text("Are you sure you want to delete \"${note.name}\"?") },
             confirmButton = {
                 TextButton(
@@ -638,53 +682,15 @@ fun BookScreen(
                         vm.deleteNote(note.id)
                         noteToDelete = null
                     }
-                ) { Text("Delete", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold) }
+                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
                 TextButton(onClick = { noteToDelete = null }) { Text("Cancel") }
             }
         )
     }
-    }
-    }
-}
-
-@Composable
-private fun MiniFabItem(
-    label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    onClick: () -> Unit
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Surface(
-            shape = RoundedCornerShape(10.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
-            tonalElevation = 2.dp
-        ) {
-            Text(
-                label,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-        SmallFloatingActionButton(
-            onClick = onClick,
-            shape = CircleShape,
-            containerColor = frostedContainerColor(fallback = MaterialTheme.colorScheme.primary),
-            contentColor = MaterialTheme.colorScheme.onPrimary,
-            elevation = FloatingActionButtonDefaults.elevation(
-                defaultElevation = 0.dp,
-                pressedElevation = 0.dp
-            ),
-            modifier = Modifier.frostedFab(LocalHazeState.current)
-        ) {
-            Icon(icon, contentDescription = label)
-        }
-    }
+    } // end CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap)
+    } // end CompositionLocalProvider(LocalOneShotBitmap provides oneShotBitmap)
 }
 
 @Composable
@@ -704,22 +710,13 @@ private fun TreeModeView(
     }
 
     LazyColumn(
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
         modifier = Modifier.fillMaxSize()
     ) {
+        // Root Notes
         val rootNotes = notes.filter { it.folderPath == "/" }
         if (rootNotes.isNotEmpty()) {
-            item {
-                Text(
-                    "ROOT NOTES",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 1.5.sp,
-                    color = MaterialTheme.colorScheme.outline,
-                    modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
-                )
-            }
             items(rootNotes, key = { "root_${it.id}" }) { note ->
                 NoteListRow(
                     note = note,
@@ -732,41 +729,33 @@ private fun TreeModeView(
             }
         }
 
+        // Subfolders
         folderPaths.forEach { fPath ->
             val isExpanded = expandedFolders[fPath] ?: true
             item(key = "folder_$fPath") {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
                         .clickable { expandedFolders[fPath] = !isExpanded }
-                        .padding(vertical = 12.dp, horizontal = 12.dp),
+                        .padding(vertical = 8.dp, horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primaryContainer),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            if (isExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Icon(
+                        if (isExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
                     Icon(
                         Icons.Default.Folder,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(20.dp)
                     )
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        fPath.removePrefix("/"),
+                        fPath,
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp,
                         color = MaterialTheme.colorScheme.primary
@@ -779,7 +768,7 @@ private fun TreeModeView(
                 items(fNotes, key = { "fn_${it.id}" }) { note ->
                     NoteListRow(
                         note = note,
-                        modifier = Modifier.padding(start = 16.dp),
+                        modifier = Modifier.padding(start = 24.dp),
                         onClick = { onNoteClick(note) },
                         onOpenFloat = { onOpenFloat(note) },
                         onRename = { onRename(note) },
@@ -808,46 +797,34 @@ private fun BookStatisticsTab(notes: List<Note>, bookTitle: String) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(20.dp)
+            .padding(16.dp)
             .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text("Statistics for \"$bookTitle\"", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text("Statistics for \"$bookTitle\"", fontSize = 18.sp, fontWeight = FontWeight.Bold)
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            ElevatedCard(
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(20.dp),
-                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
-            ) {
-                Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("${notes.size}", fontSize = 32.sp, fontWeight = FontWeight.Bold)
+            Card(modifier = Modifier.weight(1f)) {
+                Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("${notes.size}", fontSize = 28.sp, fontWeight = FontWeight.Bold)
                     Text("Total Files", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
                 }
             }
-            ElevatedCard(
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(20.dp),
-                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
-            ) {
-                Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("$totalWords", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Card(modifier = Modifier.weight(1f)) {
+                Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("$totalWords", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     Text("Total Words", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
                 }
             }
         }
 
-        Text("Word Count Ranking", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text("Files Word Count Ranking", fontSize = 16.sp, fontWeight = FontWeight.Bold)
 
-        ElevatedCard(
-            shape = RoundedCornerShape(20.dp),
-            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (scoredNotes.isEmpty()) {
                     Text("No files in this book", color = MaterialTheme.colorScheme.outline)
                 } else {
@@ -859,18 +836,16 @@ private fun BookStatisticsTab(notes: List<Note>, bookTitle: String) {
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(note.name, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                Text("$count words", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                                Text("$count words", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                             }
                             Text(text = "Folder: ${note.folderPath}", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
-                            Spacer(modifier = Modifier.height(6.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
                             LinearProgressIndicator(
                                 progress = { ratio },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(8.dp)
-                                    .clip(CircleShape),
-                                color = MaterialTheme.colorScheme.primary,
-                                trackColor = MaterialTheme.colorScheme.surfaceVariant
+                                    .clip(CircleShape)
                             )
                         }
                     }
@@ -901,49 +876,40 @@ private fun NoteListRow(
     }
 
     val createdStr = remember(note.createdAt) {
-        SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date(note.createdAt))
+        SimpleDateFormat("MMM d, yyyy · h:mm a", Locale.getDefault()).format(Date(note.createdAt))
     }
     val modifiedStr = remember(note.updatedAt) {
-        SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date(note.updatedAt))
+        SimpleDateFormat("MMM d, yyyy · h:mm a", Locale.getDefault()).format(Date(note.updatedAt))
     }
 
-    ElevatedCard(
-        onClick = { onClick() },
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
-        modifier = modifier.fillMaxWidth()
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(12.dp)
     ) {
         Column(
             modifier = Modifier
-                .padding(16.dp)
+                .padding(12.dp)
                 .fillMaxWidth()
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Outlined.Description,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(14.dp))
+                Icon(
+                    Icons.Outlined.Description,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(note.name, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     Text(
-                        text = "$wordCount words · ${note.folderPath}",
+                        text = "$wordCount words • ${note.folderPath}",
                         fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Medium
+                        color = MaterialTheme.colorScheme.primary
                     )
                 }
                 Box {
@@ -953,45 +919,40 @@ private fun NoteListRow(
                     DropdownMenu(
                         expanded = showMenu,
                         onDismissRequest = { showMenu = false },
-                        containerColor = LocalSolidSurface.current,
-                        shape = RoundedCornerShape(16.dp)
+                        containerColor = LocalSolidSurface.current
                     ) {
                         DropdownMenuItem(text = { Text("Open") }, onClick = { showMenu = false; onClick() })
                         DropdownMenuItem(text = { Text("Open in Floating Window") }, onClick = { showMenu = false; onOpenFloat() })
                         DropdownMenuItem(text = { Text("Rename") }, onClick = { showMenu = false; onRename() })
                         DropdownMenuItem(text = { Text("Duplicate") }, onClick = { showMenu = false; onDuplicate() })
-                        DropdownMenuItem(
-                            text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                            onClick = { showMenu = false; onDelete() }
-                        )
+                        DropdownMenuItem(text = { Text("Delete") }, onClick = { showMenu = false; onDelete() })
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
+            // 3-line preview
             Text(
                 text = previewText,
                 fontSize = 12.sp,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                lineHeight = 17.sp
+                lineHeight = 16.sp
             )
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
+            // Created and Modified timestamps
+            Column {
                 Text(
-                    text = "Created $createdStr",
+                    text = "Created: $createdStr",
                     fontSize = 10.sp,
                     color = MaterialTheme.colorScheme.outline
                 )
                 Text(
-                    text = "Modified $modifiedStr",
+                    text = "Modified: $modifiedStr",
                     fontSize = 10.sp,
                     color = MaterialTheme.colorScheme.outline
                 )

@@ -112,13 +112,7 @@ fun ThemeListScreen(
                     containerColor = Color.Transparent
                 ),
                 modifier = Modifier.frostedBar(hazeState),
-                title = {
-                    Text(
-                        "Themes",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleLarge
-                    )
-                },
+                title = { Text("Themes", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -132,8 +126,7 @@ fun ThemeListScreen(
                         DropdownMenu(
                             expanded = showTopMenu,
                             onDismissRequest = { showTopMenu = false },
-                            containerColor = LocalSolidSurface.current,
-                            shape = RoundedCornerShape(16.dp)
+                            containerColor = LocalSolidSurface.current
                         ) {
                             DropdownMenuItem(
                                 text = { Text("Import Theme") },
@@ -165,16 +158,15 @@ fun ThemeListScreen(
                     )
                 },
                 containerColor = frostedContainerColor(fallback = MaterialTheme.colorScheme.primary),
-                shape = RoundedCornerShape(20.dp),
-                modifier = Modifier.frostedFab(hazeState, shape = RoundedCornerShape(20.dp))
+                modifier = Modifier.frostedFab(hazeState, shape = androidx.compose.material3.FloatingActionButtonDefaults.shape)
             ) {
                 Icon(Icons.Default.Add, contentDescription = "New Theme")
             }
         }
     ) { padding ->
         LazyColumn(
-            contentPadding = PaddingValues(20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
@@ -215,7 +207,7 @@ fun ThemeListScreen(
         themeToDelete?.let { theme ->
             FrostedDialog(
                 onDismissRequest = { themeToDelete = null },
-                title = { Text("Delete \"${theme.name}\"?", fontWeight = FontWeight.Bold) },
+                title = { Text("Delete \"${theme.name}\"?") },
                 text = { Text("Are you sure you want to delete this theme?") },
                 confirmButton = {
                     TextButton(
@@ -223,7 +215,7 @@ fun ThemeListScreen(
                             vm.delete(theme.id)
                             themeToDelete = null
                         }
-                    ) { Text("Delete", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold) }
+                    ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
                 },
                 dismissButton = {
                     TextButton(onClick = { themeToDelete = null }) { Text("Cancel") }
@@ -249,7 +241,7 @@ private fun ThemeCard(
     val textColor = parseComposeColor(theme.colors.text, Color.Black)
     val mutedColor = parseComposeColor(theme.colors.mutedText, textColor.copy(alpha = 0.7f))
     val accentColor = parseComposeColor(theme.colors.accent, Color.Blue)
-    val cardShape = RoundedCornerShape(20.dp)
+    val cardShape = RoundedCornerShape(12.dp)
 
     val displayName = if (!theme.emoji.isNullOrEmpty()) "${theme.emoji} ${theme.name}" else theme.name
 
@@ -258,14 +250,14 @@ private fun ThemeCard(
         modifier = Modifier
             .fillMaxWidth()
             .shadow(
-                elevation = if (isSelected) 10.dp else 4.dp,
+                elevation = if (isSelected) 8.dp else 4.dp,
                 shape = cardShape,
                 ambientColor = if (isSelected) accentColor else Color.Black,
                 spotColor = if (isSelected) accentColor else Color.Black
             )
             .then(
                 if (isSelected) Modifier.border(
-                    2.5.dp,
+                    2.dp,
                     accentColor,
                     cardShape
                 ) else Modifier.border(
@@ -283,35 +275,36 @@ private fun ThemeCard(
                 .height(IntrinsicSize.Min),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Bookmark tab strip on left edge
             Box(
                 modifier = Modifier
-                    .width(5.dp)
+                    .width(4.dp)
                     .fillMaxHeight()
                     .background(
                         accentColor,
-                        shape = RoundedCornerShape(topStart = 20.dp, bottomStart = 20.dp)
+                        shape = RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp)
                     )
             )
 
             Row(
                 modifier = Modifier
-                    .padding(horizontal = 18.dp, vertical = 22.dp)
+                    .padding(horizontal = 16.dp, vertical = 20.dp)
                     .fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // "Aa" circle swatch
                 Box(
                     modifier = Modifier
-                        .size(52.dp)
+                        .size(48.dp)
                         .clip(CircleShape)
-                        .background(accentColor)
-                        .border(2.dp, bgColor, CircleShape),
+                        .background(accentColor),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         "Aa",
                         color = bgColor,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp,
+                        fontSize = 16.sp,
                         fontFamily = FontHelper.getFontFamily(theme.fontFamily)
                     )
                 }
@@ -330,7 +323,7 @@ private fun ThemeCard(
                         fontSize = 12.sp,
                         color = mutedColor
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "The quick brown fox jumps over the lazy dog",
                         color = textColor,
@@ -345,7 +338,7 @@ private fun ThemeCard(
                     Box(
                         modifier = Modifier
                             .padding(end = 8.dp)
-                            .size(28.dp)
+                            .size(24.dp)
                             .clip(CircleShape)
                             .background(accentColor),
                         contentAlignment = Alignment.Center
@@ -354,7 +347,7 @@ private fun ThemeCard(
                             Icons.Default.Check,
                             contentDescription = "Active",
                             tint = bgColor,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
                     }
                 }
@@ -370,12 +363,10 @@ private fun ThemeCard(
                     DropdownMenu(
                         expanded = showMenu,
                         onDismissRequest = { showMenu = false },
-                        containerColor = LocalSolidSurface.current,
-                        shape = RoundedCornerShape(16.dp)
+                        containerColor = LocalSolidSurface.current
                     ) {
                         DropdownMenuItem(
                             text = { Text("Set Active") },
-                            leadingIcon = { Icon(Icons.Default.CheckCircle, contentDescription = null) },
                             onClick = {
                                 showMenu = false
                                 onSelect()
@@ -384,7 +375,6 @@ private fun ThemeCard(
                         if (!theme.builtIn) {
                             DropdownMenuItem(
                                 text = { Text("Edit") },
-                                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
                                 onClick = {
                                     showMenu = false
                                     onEdit()
@@ -393,7 +383,6 @@ private fun ThemeCard(
                         }
                         DropdownMenuItem(
                             text = { Text("Duplicate") },
-                            leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
                             onClick = {
                                 showMenu = false
                                 onDuplicate()
@@ -402,15 +391,13 @@ private fun ThemeCard(
                         if (!theme.builtIn) {
                             DropdownMenuItem(
                                 text = { Text("Export") },
-                                leadingIcon = { Icon(Icons.Default.FileUpload, contentDescription = null) },
                                 onClick = {
                                     showMenu = false
                                     onExport()
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                                text = { Text("Delete") },
                                 onClick = {
                                     showMenu = false
                                     onDelete()
