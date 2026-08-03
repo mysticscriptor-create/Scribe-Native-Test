@@ -47,6 +47,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.graphics.toArgb
+import androidx.core.graphics.ColorUtils
 import androidx.core.view.WindowCompat
 import coil3.ImageLoader
 import coil3.compose.AsyncImage
@@ -119,34 +120,67 @@ fun autoTextColor(bg: Color): Color {
 }
 
 /**
- * Returns an accent color guaranteed to be visible against the surface.
- * - No background image → returns the original theme accent unchanged.
- * - Background image active → checks contrast ratio between accent and surface.
- *   If contrast is already good enough (≥ 2.5), keeps the original accent.
- *   If contrast is too low, blends the accent toward white or black just enough
- *   to be readable, while keeping a subtle hint of the original hue.
+ * Returns an accent colour that is always visually prominent against the actual
+ * background image.
+ *
+ * When no background image is active the accent is returned unchanged.
+ *
+ * When a background image IS active:
+ *  - If [savedBgLuminance] ≥ 0 (computed at crop-confirm time), contrast is checked
+ *    against the *real* background luminance — not the theme surface colour. This fixes
+ *    the core bug where baby-blue on a white background was invisible.
+ *  - If [savedBgLuminance] == -1f (old theme), falls back to checking against
+ *    [solidSurface] as before.
+ *
+ * Contrast target is 3.0:1 (WCAG minimum for UI components / large text). If the
+ * accent already meets this threshold it is returned unchanged, preserving the user's
+ * chosen colour exactly.
+ *
+ * When contrast is insufficient the accent is adjusted by shifting its HSL Lightness
+ * using AndroidX [ColorUtils] — no custom math helpers needed. The hue and saturation
+ * are preserved so the colour is always recognisably the same accent.  Only Lightness
+ * moves: darker for a light background, lighter for a dark background.  This avoids
+ * the jarring hue-rotation fallback that the previous approach used.
  */
 fun adaptiveAccentColor(
     accent: Color,
     solidSurface: Color,
-    hasBgImage: Boolean
+    hasBgImage: Boolean,
+    savedBgLuminance: Float = -1f
 ): Color {
     if (!hasBgImage) return accent
-    val surfaceLum = solidSurface.luminance()
+
+    // Determine the luminance we're contrasting against.
+    // savedBgLuminance is the real image average; solidSurface is the old fallback.
+    val bgLum: Float = if (savedBgLuminance >= 0f) savedBgLuminance else solidSurface.luminance()
+
     val accentLum = accent.luminance()
-    val lighter = maxOf(surfaceLum, accentLum)
-    val darker = minOf(surfaceLum, accentLum)
+    val lighter = maxOf(bgLum, accentLum)
+    val darker = minOf(bgLum, accentLum)
     val contrastRatio = (lighter + 0.05f) / (darker + 0.05f)
-    if (contrastRatio >= 2.5f) return accent
-    // Blend accent toward the readable color (white or black) by 55%
-    val readable = if (surfaceLum > 0.5f) Color.Black else Color.White
-    val t = 0.55f
-    return Color(
-        red = accent.red + (readable.red - accent.red) * t,
-        green = accent.green + (readable.green - accent.green) * t,
-        blue = accent.blue + (readable.blue - accent.blue) * t,
-        alpha = accent.alpha
-    )
+
+    // Already readable enough — keep the user's exact colour.
+    if (contrastRatio >= 3.0f) return accent
+
+    // Shift HSL Lightness using the AndroidX utility that already lives in the project.
+    val hsl = FloatArray(3)
+    ColorUtils.colorToHSL(accent.toArgb(), hsl)
+
+    // On a light background (bgLum > 0.5) darken the accent; on a dark background lighten it.
+    // We step in increments of 0.05 until we reach 3.0:1 or exhaust the range.
+    val step = if (bgLum > 0.5f) -0.05f else 0.05f
+    repeat(18) { // max 18 steps covers the full 0–1 lightness range
+        hsl[2] = (hsl[2] + step).coerceIn(0.05f, 0.95f)
+        val candidate = Color(ColorUtils.HSLToColor(hsl) or (0xFF shl 24))
+        val candLum = candidate.luminance()
+        val cLighter = maxOf(bgLum, candLum)
+        val cDarker = minOf(bgLum, candLum)
+        if ((cLighter + 0.05f) / (cDarker + 0.05f) >= 3.0f) return candidate
+    }
+
+    // If we never hit 3.0:1 (extremely rare — means the hue itself is too close to the
+    // background at all lightness levels), return the most-shifted candidate we have.
+    return Color(ColorUtils.HSLToColor(hsl) or (0xFF shl 24))
 }
 
 @Composable
@@ -310,18 +344,25 @@ fun Modifier.frostedCard(
 // both the frosted modifier AND set LocalContentColor to the correct contrasting
 // colour so every Text and Icon inside inherits the right colour automatically,
 // with no per-element colour arguments needed.
-//
-// autoTextColor() (defined above) returns Black for light surfaces, White for dark.
 
 /**
  * Wraps [content] with LocalContentColor set to contrast against the frosted bar surface.
+ *
+ * When a background image is active, uses [savedBgLuminance] (precomputed at crop time)
+ * to determine whether white or dark text is needed against the real visual background.
+ * Falls back to [autoTextColor] against the solid surface for old themes without this field.
  * Use this around TopAppBar / NavigationBar / BottomAppBar content lambdas.
  */
 @Composable
 fun FrostedBarContent(content: @Composable () -> Unit) {
     val solidSurface = LocalSolidSurface.current
+    val theme = LocalAppTheme.current
+    val savedLum = theme?.savedBgLuminance ?: -1f
     val hasBgImage = localHasBgImage()
-    val contentColor = if (hasBgImage) autoTextColor(solidSurface) else autoTextColor(solidSurface)
+    val contentColor = when {
+        hasBgImage && savedLum >= 0f -> if (savedLum < 0.45f) Color.White else Color(0xFF1A1A1A)
+        else -> autoTextColor(solidSurface)
+    }
     CompositionLocalProvider(LocalContentColor provides contentColor) {
         content()
     }
@@ -329,12 +370,22 @@ fun FrostedBarContent(content: @Composable () -> Unit) {
 
 /**
  * Wraps [content] with LocalContentColor set to contrast against the frosted panel surface.
+ *
+ * When a background image is active, uses [savedBgLuminance] (precomputed at crop time)
+ * to determine whether white or dark text is needed against the real visual background.
+ * Falls back to [autoTextColor] against the solid surface for old themes without this field.
  * Use this around drawer / side-panel content.
  */
 @Composable
 fun FrostedPanelContent(content: @Composable () -> Unit) {
     val solidSurface = LocalSolidSurface.current
-    val contentColor = autoTextColor(solidSurface)
+    val theme = LocalAppTheme.current
+    val savedLum = theme?.savedBgLuminance ?: -1f
+    val hasBgImage = localHasBgImage()
+    val contentColor = when {
+        hasBgImage && savedLum >= 0f -> if (savedLum < 0.45f) Color.White else Color(0xFF1A1A1A)
+        else -> autoTextColor(solidSurface)
+    }
     CompositionLocalProvider(LocalContentColor provides contentColor) {
         content()
     }
@@ -597,20 +648,49 @@ fun ScribeComposeTheme(
     val border = parseComposeColor(resolvedTheme.colors.border, Color(0xFFE0E0D8))
     val surfaceVariant = parseComposeColor(resolvedTheme.colors.surface, surface)
 
-    val isLight = !resolvedTheme.isDark
-    val defaultText = if (resolvedTheme.isDark) Color.White else Color(0xFF1A1A1A)
-    val defaultAccent = if (resolvedTheme.isDark) Color(0xFFE0E0E0) else Color(0xFF333333)
-    val imageContrast = analysisBitmap?.let {
-        contrastingTextColor(
-            bitmap = it,
-            screenRect = Rect(0f, 0f, screenWidthPx, screenHeightPx),
-            screenWidthPx = screenWidthPx,
-            screenHeightPx = screenHeightPx
-        )
+    val bgLum = resolvedTheme.savedBgLuminance
+
+    // ── Text colour resolution ────────────────────────────────────────────────
+    // Priority order:
+    // 1. savedBgLuminance ≥ 0: use the precomputed real background luminance.
+    //    Only override if the user hasn't manually set a custom text colour.
+    //    We detect "custom" by checking whether configuredText differs from BOTH
+    //    the light default and the dark default — if it matches neither, the user
+    //    picked something intentional and we leave it alone.
+    // 2. analysisBitmap available (old theme, no savedBgLuminance): live analysis.
+    // 3. Neither: use the stored configuredText as-is.
+    val lightDefault = Color.White
+    val darkDefault = Color(0xFF1A1A1A)
+    val isDefaultText = configuredText == lightDefault || configuredText == darkDefault
+    val text: Color = when {
+        hasBgImage && bgLum >= 0f && isDefaultText ->
+            if (bgLum < 0.45f) Color.White else Color(0xFF1A1A1A)
+        hasBgImage && bgLum < 0f && analysisBitmap != null -> {
+            // Fallback: live analysis for old themes
+            contrastingTextColor(
+                bitmap = analysisBitmap,
+                screenRect = Rect(0f, 0f, screenWidthPx, screenHeightPx),
+                screenWidthPx = screenWidthPx,
+                screenHeightPx = screenHeightPx
+            )
+        }
+        else -> configuredText
     }
-    val text = if (hasBgImage && configuredText == defaultText && imageContrast != null) imageContrast else configuredText
-    val accentIcons = if (hasBgImage && configuredAccent == defaultAccent && imageContrast != null) imageContrast else configuredAccent
+
+    // ── Accent colour resolution ──────────────────────────────────────────────
+    // Use adaptiveAccentColor with savedBgLuminance so it contrasts the real image,
+    // not the theme surface. This is now used for the full color scheme (accentIcons),
+    // replacing the old hard-coded white/black override.
+    val accentIcons = adaptiveAccentColor(
+        accent = configuredAccent,
+        solidSurface = surface,
+        hasBgImage = hasBgImage,
+        savedBgLuminance = bgLum
+    )
+
     val onPrimaryColor = if (accentIcons.luminance() < 0.5f) Color.White else Color.Black
+
+    val isLight = !resolvedTheme.isDark
 
     val rawColorScheme: ColorScheme = if (isLight) {
         lightColorScheme(

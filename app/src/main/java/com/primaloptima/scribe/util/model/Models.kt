@@ -102,7 +102,17 @@ data class AppTheme(
     val frostedBlurRadius: Float = 15f,
     val textAlignment: String = "left", // "left" | "justified" | "center"
     val themeScope: String = "whole_app", // "editor_only" | "whole_app"
-    val emoji: String? = null
+    val emoji: String? = null,
+    /**
+     * Average linear luminance of the background image, computed once at crop-confirm
+     * time and stored with the theme. Range [0.0, 1.0]: 0 = black, 1 = white.
+     * -1f means not yet computed (no image set, or pre-existing theme without this field).
+     * Gson will deserialize old JSON without this field and default it to -1f cleanly.
+     *
+     * This single float drives text colour, frosted-panel content colour, and
+     * accent-colour adaptation at runtime with zero bitmap processing on the device.
+     */
+    val savedBgLuminance: Float = -1f
 )
 
 // ── SAF scan result ───────────────────────────────────────────────────────────
