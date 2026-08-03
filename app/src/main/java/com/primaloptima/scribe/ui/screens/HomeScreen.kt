@@ -98,44 +98,71 @@ fun HomeScreen(
     var rightPanelVisible by remember { mutableStateOf(false) }
     var fabExpanded by remember { mutableStateOf(false) }
 
-    // One-shot blurred capture for pre-API-31 frosted glass on the left drawer
+    // ── Left drawer one-shot blur (pre-API-31) ──────────────────────────────
+    // Bitmap is prepared BEFORE the drawer starts opening so the first visible
+    // frame already has the finished frosted look. No intermediate tint.
     val view = LocalView.current
     val blurRadiusPx = com.primaloptima.scribe.ui.theme.LocalFrostedBlurRadius.current.toInt().coerceIn(1, 25)
     var oneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var captured by remember { mutableStateOf(false) }
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-        LaunchedEffect(drawerState.currentValue, drawerState.targetValue) {
-            if (drawerState.targetValue == DrawerValue.Open && !captured) {
-                captured = true
-                val raw = BitmapBlur.captureOnly(view)  // must stay on Main thread
-                oneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    var isPreparingDrawer by remember { mutableStateOf(false) }
+
+    val openDrawerWithBlur: () -> Unit = {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            scope.launch { drawerState.open() }
+        } else {
+            if (isPreparingDrawer || drawerState.isOpen) return@openDrawerWithBlur
+            isPreparingDrawer = true
+            scope.launch {
+                val raw = BitmapBlur.captureOnly(view)          // must stay on Main
+                val blurred = withContext(Dispatchers.IO) {
                     raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
                 }
-            } else if (drawerState.currentValue == DrawerValue.Closed &&
-                       drawerState.targetValue == DrawerValue.Closed) {
-                // Only clear when fully settled — not mid close-animation
-                captured = false
+                oneShotBitmap = blurred
+                isPreparingDrawer = false
+                drawerState.open()                               // animation starts only now
+            }
+        }
+    }
+
+    // Clear the bitmap only when the drawer is fully closed again
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        LaunchedEffect(drawerState.currentValue, drawerState.targetValue) {
+            if (drawerState.currentValue == DrawerValue.Closed &&
+                drawerState.targetValue == DrawerValue.Closed
+            ) {
                 oneShotBitmap = null
             }
         }
     }
-    // One-shot bitmap for the right panel (same pattern as left drawer).
-    // Captured when rightPanelVisible becomes true — before the slide-in animation
-    // starts — so the panel's first frame already has a valid blur behind it.
+
+    // ── Right panel one-shot blur (pre-API-31) ──────────────────────────────
+    // Same gated pattern: capture + blur first, then show the panel.
     var rightOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var rightCaptured by remember { mutableStateOf(false) }
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-        LaunchedEffect(rightPanelVisible) {
-            if (rightPanelVisible && !rightCaptured) {
-                rightCaptured = true
+    var isPreparingRight by remember { mutableStateOf(false) }
+
+    val openRightPanelWithBlur: () -> Unit = {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            rightPanelVisible = true
+        } else {
+            if (isPreparingRight || rightPanelVisible) return@openRightPanelWithBlur
+            isPreparingRight = true
+            scope.launch {
                 val raw = BitmapBlur.captureOnly(view)
-                rightOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val blurred = withContext(Dispatchers.IO) {
                     raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
                 }
-            } else if (!rightPanelVisible) {
-                // Wait for the 200ms slide-out animation before clearing
+                rightOneShotBitmap = blurred
+                isPreparingRight = false
+                rightPanelVisible = true                         // animation starts only now
+            }
+        }
+    }
+
+    // Clear after the close animation finishes
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        LaunchedEffect(rightPanelVisible) {
+            if (!rightPanelVisible) {
                 kotlinx.coroutines.delay(250)
-                rightCaptured = false
                 rightOneShotBitmap = null
             }
         }
@@ -257,15 +284,15 @@ fun HomeScreen(
             onHorizontalDrag = { change, dragAmount ->
                 totalX += dragAmount
                 val threshold = 36.dp.toPx()
-                // Left-edge swipe → open navigation drawer
+                // Left-edge swipe → open navigation drawer (gated behind blur)
                 if (drawerState.isClosed && startX < size.width * 0.3f && totalX > threshold) {
                     change.consume()
-                    scope.launch { drawerState.open() }
+                    openDrawerWithBlur()
                 }
-                // Right-edge swipe → open stats panel
+                // Right-edge swipe → open stats panel (gated behind blur)
                 if (!rightPanelVisible && startX > size.width * 0.72f && totalX < -threshold) {
                     change.consume()
-                    rightPanelVisible = true
+                    openRightPanelWithBlur()
                 }
             }
         )
@@ -491,7 +518,7 @@ fun HomeScreen(
                         }
                     },
                     navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                        IconButton(onClick = { openDrawerWithBlur() }) {
                             val (iconColor, iconModifier) = rememberAdaptiveTextColor(
                                 fallback = MaterialTheme.colorScheme.primary
                             )
@@ -505,7 +532,7 @@ fun HomeScreen(
                     },
                     actions = {
                         if (!isSearching) {
-                            IconButton(onClick = { rightPanelVisible = !rightPanelVisible }) {
+                            IconButton(onClick = { openRightPanelWithBlur() }) {
                                 Icon(Icons.Default.Info, contentDescription = "Overview")
                             }
                             IconButton(onClick = { isSearching = true }) {
