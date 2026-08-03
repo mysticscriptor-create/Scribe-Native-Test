@@ -42,6 +42,22 @@ class PrefsManager(context: Context) {
         get() = prefs.getBoolean(KEY_LEGACY_BLUR, false)
         set(v) = prefs.edit().putBoolean(KEY_LEGACY_BLUR, v).apply()
 
+    // ── Dashboard / Ongoing project ───────────────────────────────────────────
+
+    /** ID of the book the user has designated as their ongoing project, or null. */
+    var ongoingProjectBookId: String?
+        get() = prefs.getString(KEY_ONGOING_PROJECT, null)
+        set(v) = if (v == null) prefs.edit().remove(KEY_ONGOING_PROJECT).apply()
+                 else prefs.edit().putString(KEY_ONGOING_PROJECT, v).apply()
+
+    /**
+     * Which tab to land on at startup.
+     * "dashboard" → page 0 (Dashboard), "books" → page 1 (Books). Default "books".
+     */
+    var homeStartPage: String
+        get() = prefs.getString(KEY_HOME_START_PAGE, "books") ?: "books"
+        set(v) = prefs.edit().putString(KEY_HOME_START_PAGE, v).apply()
+
     // ── Themes ────────────────────────────────────────────────────────────────
 
     /** JSON array of custom Theme objects */
@@ -183,6 +199,8 @@ class PrefsManager(context: Context) {
 
     companion object {
         private const val KEY_LEGACY_BLUR           = "scribe.legacyBlur.v1"
+        private const val KEY_ONGOING_PROJECT        = "scribe.ongoingProject.v1"
+        private const val KEY_HOME_START_PAGE        = "scribe.homeStartPage.v1"
         private const val KEY_ACTIVE_NOTE        = "scribe.activeNote.v1"
         private const val KEY_VAULT_NAME         = "scribe.vaultName.v1"
         private const val KEY_EXTERNAL_ROOT      = "scribe.externalRoot.v1"

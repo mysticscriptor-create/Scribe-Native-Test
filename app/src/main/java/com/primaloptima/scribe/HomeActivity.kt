@@ -10,6 +10,7 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.primaloptima.scribe.data.Book
 import com.primaloptima.scribe.ui.screens.HomeScreen
+import com.primaloptima.scribe.MainActivity
 import com.primaloptima.scribe.ui.theme.ScribeComposeTheme
 import com.primaloptima.scribe.util.PrefsManager
 import com.primaloptima.scribe.viewmodel.HomeViewModel
@@ -51,6 +52,7 @@ class HomeActivity : ComponentActivity() {
                 HomeScreen(
                     vm = vm,
                     onOpenBook     = { book -> openBook(book) },
+                    onOpenNote     = { noteId, bookId -> openNote(noteId, bookId) },
                     onOpenSettings = { startActivity(Intent(this, SettingsActivity::class.java)) },
                     onOpenSheets   = { startActivity(Intent(this, SheetsActivity::class.java)) },
                     onOpenThemes   = { startActivity(Intent(this, ThemeListActivity::class.java)) }
@@ -69,6 +71,14 @@ class HomeActivity : ComponentActivity() {
             Intent(this, BookActivity::class.java)
                 .putExtra(BookActivity.EXTRA_BOOK_ID, book.id)
                 .putExtra(BookActivity.EXTRA_BOOK_TITLE, book.title)
+        )
+    }
+
+    private fun openNote(noteId: String, bookId: String) {
+        startActivity(
+            Intent(this, MainActivity::class.java)
+                .putExtra(MainActivity.EXTRA_NOTE_ID, noteId)
+                .putExtra(MainActivity.EXTRA_BOOK_ID, bookId)
         )
     }
 

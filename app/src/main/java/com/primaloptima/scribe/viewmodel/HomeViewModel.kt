@@ -14,6 +14,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -37,6 +43,80 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshStreak() {
         _currentStreak.value = app.prefs.getStreak().currentStreak
+    }
+
+    // ── Ongoing Project ───────────────────────────────────────────────────────
+
+    private val _ongoingProjectBookId = MutableStateFlow(app.prefs.ongoingProjectBookId)
+    val ongoingProjectBookId: StateFlow<String?> = _ongoingProjectBookId.asStateFlow()
+
+    /**
+     * Notes inside /Chapters of the ongoing project, sorted newest-first.
+     * Emits an empty list when no project is set.
+     */
+    val ongoingProjectChapters: StateFlow<List<Note>> =
+        _ongoingProjectBookId
+            .flatMapLatest { bookId ->
+                if (bookId == null) flowOf(emptyList())
+                else db.noteDao().observeByBook(bookId)
+                    .map { notes -> notes.filter { it.folderPath == "/Chapters" } }
+            }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /**
+     * All notes inside the ongoing project's book (used for total word count).
+     * Emits an empty list when no project is set.
+     */
+    val ongoingProjectAllNotes: StateFlow<List<Note>> =
+        _ongoingProjectBookId
+            .flatMapLatest { bookId ->
+                if (bookId == null) flowOf(emptyList())
+                else db.noteDao().observeByBook(bookId)
+            }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /**
+     * Designates [bookId] as the ongoing project and ensures /Chapters folder exists.
+     * Safe to call multiple times — folder insert is IGNORE on conflict.
+     */
+    fun setOngoingProject(bookId: String) {
+        app.prefs.ongoingProjectBookId = bookId
+        _ongoingProjectBookId.value = bookId
+        viewModelScope.launch(Dispatchers.IO) {
+            db.noteDao().insertFolder(Folder(bookId = bookId, path = "/Chapters"))
+        }
+    }
+
+    /** Removes the ongoing project designation. Does NOT delete the Chapters folder or notes. */
+    fun clearOngoingProject() {
+        app.prefs.ongoingProjectBookId = null
+        _ongoingProjectBookId.value = null
+    }
+
+    /**
+     * Creates a new chapter note in /Chapters of the ongoing project.
+     * Auto-names it "Chapter N" based on existing chapter count.
+     * [onCreated] is called on the Main thread with the new note.
+     */
+    fun createChapter(onCreated: (Note) -> Unit) {
+        val bookId = _ongoingProjectBookId.value ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val existing = db.noteDao().getByBookFolder(bookId, "/Chapters")
+            val nextNumber = existing.size + 1
+            val id = java.util.UUID.randomUUID().toString()
+            val now = System.currentTimeMillis()
+            val note = Note(
+                id = id,
+                bookId = bookId,
+                name = "Chapter $nextNumber",
+                content = "",
+                folderPath = "/Chapters",
+                createdAt = now,
+                updatedAt = now
+            )
+            db.noteDao().insert(note)
+            withContext(Dispatchers.Main) { onCreated(note) }
+        }
     }
 
     // ── Quick Note Creation ──────────────────────────────────────────────────
