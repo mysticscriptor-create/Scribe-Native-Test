@@ -38,7 +38,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import com.primaloptima.scribe.ui.theme.LocalAppTheme
+import com.primaloptima.scribe.ui.theme.LocalAccentColor
 import android.graphics.Bitmap
 import android.os.Build
 import com.primaloptima.scribe.ui.theme.LocalHazeState
@@ -52,8 +52,7 @@ import com.primaloptima.scribe.ui.theme.frostedPanel
 import com.primaloptima.scribe.ui.theme.FrostedDialog
 import com.primaloptima.scribe.ui.theme.FrostedBarContent
 import com.primaloptima.scribe.ui.theme.FrostedPanelContent
-import com.primaloptima.scribe.ui.theme.parseComposeColor
-import com.primaloptima.scribe.ui.theme.adaptiveAccentColor
+
 import com.primaloptima.scribe.ui.theme.localHasBgImage
 import androidx.compose.material3.LocalContentColor
 import com.primaloptima.scribe.util.BitmapBlur
@@ -288,16 +287,7 @@ fun HomeScreen(
                     .frostedPanel(hazeState)
             ) {
                 FrostedPanelContent {
-                val drawerTheme = LocalAppTheme.current
-                val rawAccentColor = drawerTheme?.let {
-                    parseComposeColor(it.colors.accent, MaterialTheme.colorScheme.primary)
-                } ?: MaterialTheme.colorScheme.primary
-                val accentColor = adaptiveAccentColor(
-                    accent = rawAccentColor,
-                    solidSurface = LocalSolidSurface.current,
-                    hasBgImage = localHasBgImage(),
-                    savedBgLuminance = LocalAppTheme.current?.savedBgLuminance ?: -1f
-                )
+                val accentColor = LocalAccentColor.current
                 val (adaptiveTextColor, adaptiveTextModifier) = rememberAdaptiveTextColor(
                     fallback = MaterialTheme.colorScheme.onSurface
                 )
@@ -597,9 +587,7 @@ fun HomeScreen(
                         .frostedBar(hazeState)
                         .windowInsetsPadding(WindowInsets.navigationBars)
                 ) {
-                    val activeTheme = LocalAppTheme.current
-                    val accentColor = activeTheme?.let { parseComposeColor(it.colors.accent, MaterialTheme.colorScheme.primary) }
-                        ?: MaterialTheme.colorScheme.primary
+                    val accentColor = LocalAccentColor.current
                     val navColors = NavigationBarItemDefaults.colors(
                         indicatorColor = accentColor,
                         selectedIconColor = MaterialTheme.colorScheme.onPrimary,
@@ -646,10 +634,7 @@ fun HomeScreen(
                 // FAB is always visible — LocalBarBlurBitmap (derived from the Coil
                 // image in ScribeTheme) is already loaded, no screen capture needed.
                 CompositionLocalProvider(LocalOneShotBitmap provides LocalBarBlurBitmap.current) {
-                val fabTheme = LocalAppTheme.current
-                val accentClr = fabTheme?.let {
-                    parseComposeColor(it.colors.accent, MaterialTheme.colorScheme.primary)
-                } ?: MaterialTheme.colorScheme.primary
+                val accentClr = LocalAccentColor.current
 
                 AnimatedContent(
                     targetState = selectedNavTab,
