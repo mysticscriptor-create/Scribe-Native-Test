@@ -54,6 +54,7 @@ import com.primaloptima.scribe.ui.theme.FrostedBarContent
 import com.primaloptima.scribe.ui.theme.FrostedPanelContent
 
 import com.primaloptima.scribe.ui.theme.localHasBgImage
+import com.primaloptima.scribe.ui.theme.LocalFrostedGlass
 import androidx.compose.material3.LocalContentColor
 import com.primaloptima.scribe.util.BitmapBlur
 import androidx.compose.ui.platform.LocalView
@@ -103,13 +104,17 @@ fun HomeScreen(
     // frame already has the finished frosted look. No intermediate tint.
     val view = LocalView.current
     val blurRadiusPx = com.primaloptima.scribe.ui.theme.LocalFrostedBlurRadius.current.toInt().coerceIn(1, 25)
+    val frostedEnabled = LocalFrostedGlass.current
+    val hasBgImage = localHasBgImage.current
     var oneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isPreparingDrawer by remember { mutableStateOf(false) }
 
     val openDrawerWithBlur: () -> Unit = {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S || !frostedEnabled || !hasBgImage) {
+            // No blur needed — open immediately (API 31+, plain theme, or no bg image)
             scope.launch { drawerState.open() }
         } else {
+            // Pre-API-31 + frosted glass + bg image: capture first, then open
             if (!isPreparingDrawer && !drawerState.isOpen) {
                 isPreparingDrawer = true
                 scope.launch {
@@ -142,9 +147,11 @@ fun HomeScreen(
     var isPreparingRight by remember { mutableStateOf(false) }
 
     val openRightPanelWithBlur: () -> Unit = {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S || !frostedEnabled || !hasBgImage) {
+            // No blur needed — show immediately (API 31+, plain theme, or no bg image)
             rightPanelVisible = true
         } else {
+            // Pre-API-31 + frosted glass + bg image: capture first, then show
             if (!isPreparingRight && !rightPanelVisible) {
                 isPreparingRight = true
                 scope.launch {
