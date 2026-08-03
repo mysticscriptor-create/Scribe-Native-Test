@@ -993,7 +993,7 @@ fun HomeScreen(
         FrostedDialog(
             onDismissRequest = { bookToDelete = null },
             title = { Text("Delete Book?", fontWeight = FontWeight.Bold) },
-            text = { Text("Are you sure you want to delete "${book.title}"? All notes in it will be lost.") },
+            text = { Text("Are you sure you want to delete \"${book.title}\"? All notes in it will be lost.") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -1524,7 +1524,7 @@ private fun SearchResultsView(
 
         if (matches.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No notes found matching "$query"", color = MaterialTheme.colorScheme.outline)
+                Text("No notes found matching \"$query\"", color = MaterialTheme.colorScheme.outline)
             }
         } else {
             LazyColumn(

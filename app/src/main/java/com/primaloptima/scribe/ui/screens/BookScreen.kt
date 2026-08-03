@@ -631,7 +631,7 @@ fun BookScreen(
         FrostedDialog(
             onDismissRequest = { noteToDelete = null },
             title = { Text("Delete Note?", fontWeight = FontWeight.Bold) },
-            text = { Text("Are you sure you want to delete "${note.name}"?") },
+            text = { Text("Are you sure you want to delete \"${note.name}\"?") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -812,7 +812,7 @@ private fun BookStatisticsTab(notes: List<Note>, bookTitle: String) {
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        Text("Statistics for "$bookTitle"", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text("Statistics for \"$bookTitle\"", fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
         Row(
             modifier = Modifier.fillMaxWidth(),

@@ -215,7 +215,7 @@ fun ThemeListScreen(
         themeToDelete?.let { theme ->
             FrostedDialog(
                 onDismissRequest = { themeToDelete = null },
-                title = { Text("Delete "${theme.name}"?", fontWeight = FontWeight.Bold) },
+                title = { Text("Delete \"${theme.name}\"?", fontWeight = FontWeight.Bold) },
                 text = { Text("Are you sure you want to delete this theme?") },
                 confirmButton = {
                     TextButton(
