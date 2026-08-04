@@ -53,7 +53,6 @@ import com.primaloptima.scribe.ui.theme.FrostedDialog
 import com.primaloptima.scribe.ui.theme.FrostedBarContent
 import com.primaloptima.scribe.ui.theme.FrostedPanelContent
 
-import com.primaloptima.scribe.ui.theme.localHasBgImage
 import androidx.compose.material3.LocalContentColor
 import com.primaloptima.scribe.util.BitmapBlur
 import androidx.compose.ui.platform.LocalView
@@ -106,7 +105,17 @@ fun HomeScreen(
     // frame already has the finished frosted look. No intermediate tint.
     val view = LocalView.current
     val blurRadiusPx = com.primaloptima.scribe.ui.theme.LocalFrostedBlurRadius.current.toInt().coerceIn(1, 25)
-    val needsOneShotBlur = localHasBgImage() // already checks frostedGlass internally
+
+    // hazeState is the single source of truth for "is blur active?".
+    // ScribeComposeTheme provides a non-null HazeState ONLY when the current
+    // theme has a background image AND frosted glass is enabled — exactly the
+    // condition under which one-shot blur is needed on pre-API-31 and Haze
+    // blurs on API 31+. Using localHasBgImage() here was unreliable: it reads
+    // a different composition local that can be false even when the background
+    // IS visually present, causing drawers to skip capture and show only a tint.
+    val hazeState = LocalHazeState.current
+    val needsOneShotBlur = hazeState != null   // true iff bg image + frosted glass active
+
     var oneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isPreparingDrawer by remember { mutableStateOf(false) }
 
@@ -310,12 +319,10 @@ fun HomeScreen(
         )
     }
 
-    val hazeState = LocalHazeState.current
-
     CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap) {
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = true,
+        gesturesEnabled = false,  // custom swipeGestureModifier handles this via openDrawerWithBlur()
         drawerContent = {
             CompositionLocalProvider(LocalOneShotBitmap provides oneShotBitmap) {
             ModalDrawerSheet(
