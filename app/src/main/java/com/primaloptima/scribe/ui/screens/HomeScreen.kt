@@ -114,38 +114,25 @@ fun HomeScreen(
     // a different composition local that can be false even when the background
     // IS visually present, causing drawers to skip capture and show only a tint.
     val hazeState = LocalHazeState.current
-    val needsOneShotBlur = hazeState != null   // true iff bg image + frosted glass active
+    val needsOneShotBlur = Build.VERSION.SDK_INT < Build.VERSION_CODES.S && localHasBgImage()
 
     var oneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isPreparingDrawer by remember { mutableStateOf(false) }
 
-    val openDrawerWithBlur: () -> Unit = {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S || !needsOneShotBlur) {
-            // No blur needed — open immediately (API 31+, plain theme, or no bg image)
-            scope.launch { drawerState.open() }
-        } else {
-            // Pre-API-31 + frosted glass + bg image: capture first, then open
-            if (!isPreparingDrawer && drawerState.isClosed) {
-                isPreparingDrawer = true
-                scope.launch {
-                    val raw = BitmapBlur.captureOnly(view)          // must stay on Main
+    // Dual-purpose capture+clear: watches targetValue to capture BEFORE animation starts
+    LaunchedEffect(drawerState.targetValue) {
+        if (needsOneShotBlur) {
+            if (drawerState.targetValue == DrawerValue.Open) {
+                if (!isPreparingDrawer && oneShotBitmap == null) {
+                    isPreparingDrawer = true
+                    val raw = BitmapBlur.captureOnly(view)
                     val blurred = withContext(Dispatchers.IO) {
                         raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
                     }
                     oneShotBitmap = blurred
                     isPreparingDrawer = false
-                    drawerState.open()                               // animation starts only now
                 }
-            }
-        }
-    }
-
-    // Clear the bitmap only when the drawer is fully closed again
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-        LaunchedEffect(drawerState.currentValue, drawerState.targetValue) {
-            if (drawerState.currentValue == DrawerValue.Closed &&
-                drawerState.targetValue == DrawerValue.Closed
-            ) {
+            } else {
                 oneShotBitmap = null
             }
         }
@@ -305,11 +292,6 @@ fun HomeScreen(
             onHorizontalDrag = { change, dragAmount ->
                 totalX += dragAmount
                 val threshold = 36.dp.toPx()
-                // Left-edge swipe → open navigation drawer (gated behind blur)
-                if (drawerState.isClosed && startX < size.width * 0.3f && totalX > threshold) {
-                    change.consume()
-                    openDrawerWithBlur()
-                }
                 // Right-edge swipe → open stats panel (gated behind blur)
                 if (!rightPanelVisible && startX > size.width * 0.72f && totalX < -threshold) {
                     change.consume()
@@ -322,7 +304,7 @@ fun HomeScreen(
     CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap) {
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = false,  // custom swipeGestureModifier handles this via openDrawerWithBlur()
+        gesturesEnabled = true,
         drawerContent = {
             CompositionLocalProvider(LocalOneShotBitmap provides oneShotBitmap) {
             ModalDrawerSheet(
@@ -537,7 +519,7 @@ fun HomeScreen(
                         }
                     },
                     navigationIcon = {
-                        IconButton(onClick = { openDrawerWithBlur() }) {
+                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
                             val (iconColor, iconModifier) = rememberAdaptiveTextColor(
                                 fallback = MaterialTheme.colorScheme.primary
                             )
