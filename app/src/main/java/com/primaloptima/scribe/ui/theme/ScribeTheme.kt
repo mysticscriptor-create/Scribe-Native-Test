@@ -603,6 +603,10 @@ fun Modifier.drawWithOneShotBitmap(bitmap: Bitmap, tint: Color): Modifier {
 }
 
 fun parseComposeColor(hex: String, fallback: Color = Color.Black): Color {
+    // Guard blank/empty strings before hitting ThemeManager — avoids returning
+    // the fallback colour when a theme has an uninitialised hex field, which
+    // would accidentally match lightDefault or darkDefault in isDefaultText.
+    if (hex.isBlank()) return fallback
     return try {
         Color(ThemeManager.parseColor(hex))
     } catch (_: Exception) {
@@ -659,7 +663,11 @@ fun ScribeComposeTheme(
 
     val bg = parseComposeColor(resolvedTheme.colors.background, Color(0xFFFAFAF7))
     val surface = parseComposeColor(resolvedTheme.colors.surface, Color.White)
-    val configuredText = parseComposeColor(resolvedTheme.colors.text, Color(0xFF1A1A1A))
+    // Fallback is Color.Black (0xFF000000), NOT Color(0xFF1A1A1A) which equals
+    // darkDefault.  If parsing fails on an empty/malformed hex, a fallback that
+    // equals darkDefault would set isDefaultText = true and silently enable the
+    // auto-luminance override — the secondary cause of the text-revert bug.
+    val configuredText = parseComposeColor(resolvedTheme.colors.text, Color.Black)
     val configuredAccent = parseComposeColor(resolvedTheme.colors.accent, Color(0xFF333333))
     val border = parseComposeColor(resolvedTheme.colors.border, Color(0xFFE0E0D8))
     val surfaceVariant = parseComposeColor(resolvedTheme.colors.surface, surface)

@@ -130,6 +130,11 @@ fun ThemeEditScreen(
     val hazeState = LocalHazeState.current
     var dialogOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var dialogCaptured by remember { mutableStateOf(false) }
+    // True while computeBgLuminance is running after a crop confirm.
+    // Save buttons are disabled during this window so savedBgLuminance is
+    // never written with a stale value — the root cause of the intermittent
+    // "text reverts to theme colour" bug.
+    var isLuminancePending by remember { mutableStateOf(false) }
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
         val anyDialogOpen = showEmojiDialog || activeColorPickerTarget != null
         LaunchedEffect(anyDialogOpen) {
@@ -189,7 +194,9 @@ fun ThemeEditScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
+                    IconButton(
+                        enabled = !originalTheme.builtIn && !isLuminancePending,
+                        onClick = {
                         val updated = originalTheme.copy(
                             name = name,
                             fontSize = fontSize.toInt(),
@@ -222,7 +229,14 @@ fun ThemeEditScreen(
                         Toast.makeText(context, "Theme saved", Toast.LENGTH_SHORT).show()
                         onBack()
                     }) {
-                        Icon(Icons.Default.Check, contentDescription = "Save")
+                        if (isLuminancePending) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(Icons.Default.Check, contentDescription = "Save")
+                        }
                     }
                 }
             )
@@ -691,15 +705,26 @@ fun ThemeEditScreen(
 
                 Button(
                     onClick = saveAction,
+                    enabled = !isLuminancePending,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
-                    Icon(Icons.Default.Check, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Save Theme", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    if (isLuminancePending) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Analysing image…", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    } else {
+                        Icon(Icons.Default.Check, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Save Theme", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    }
                 }
             }
 
@@ -830,8 +855,13 @@ fun ThemeEditScreen(
                     // the same pipeline ScribeComposeTheme uses, so content:// URIs are
                     // handled correctly on all API levels. Stored in bgLuminance so that
                     // both save sites include it in savedBgLuminance without re-processing.
+                    // isLuminancePending gates the save buttons so the user can't save
+                    // before this finishes (which would write a stale savedBgLuminance
+                    // and cause the text colour to auto-compute from the wrong luminance).
+                    isLuminancePending = true
                     scope.launch {
                         bgLuminance = computeBgLuminance(context, croppedUri)
+                        isLuminancePending = false
                     }
                 },
                 onCancel = {
@@ -1639,14 +1669,27 @@ private fun ImageCropScreen(
                                     val scaled = android.graphics.Bitmap.createScaledBitmap(cropped, targetW, targetH, true)
                                     if (scaled !== cropped) cropped.recycle()
 
-                                    // Per-theme folder: same folder as the original, fixed filename.
-                                    // Overwriting "crop.jpg" replaces the previous crop with no accumulation.
+                                    // Per-theme folder. Use a timestamped filename so the URI
+                                    // always changes when the user replaces an existing image.
+                                    // This is critical for two reasons:
+                                    //  1. bgUri state change → LivePreviewCard recomposes with new image.
+                                    //  2. Different URI → Coil fetches from disk instead of serving the
+                                    //     old cached bitmap for the stale "crop.jpg" key.
                                     val dir = java.io.File(context.filesDir, "bg_images/$themeId").also { it.mkdirs() }
-                                    val dest = java.io.File(dir, "crop.jpg")
+                                    val dest = java.io.File(dir, "crop_${System.currentTimeMillis()}.jpg")
                                     dest.outputStream().use { out ->
                                         scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, out)
                                     }
                                     scaled.recycle()
+                                    // Clean up old crops AFTER the new one is safely written so
+                                    // there is never a gap where no valid crop exists on disk.
+                                    // Deletes legacy "crop.jpg" and all prior "crop_*.jpg" files
+                                    // except the one we just created, preventing accumulation.
+                                    dir.listFiles { f ->
+                                        f.name != dest.name &&
+                                        (f.name == "crop.jpg" ||
+                                         (f.name.startsWith("crop_") && f.name.endsWith(".jpg")))
+                                    }?.forEach { it.delete() }
                                     val resultUri = android.net.Uri.fromFile(dest).toString()
                                     resultUri
                                 } catch (e: Exception) {
