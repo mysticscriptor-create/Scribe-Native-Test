@@ -5,10 +5,10 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.VelocityTracker
-import androidx.compose.foundation.gestures.addPointerInputChange
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
