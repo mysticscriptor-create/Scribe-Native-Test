@@ -291,30 +291,30 @@ fun HomeScreen(
     //   Left edge  swipe-right → openLeftDrawerWithBlur (captures clean frame first)
     //   Right edge swipe-left  → openRightPanelWithBlur (unchanged)
     // 32 dp left grab-zone matches the standard Android edge-gesture width.
-    val swipeGestureModifier = Modifier.pointerInput(rightPanelVisible) {
-        var startX = 0f
-        var totalX = 0f
-        detectHorizontalDragGestures(
-            onDragStart = { offset ->
-                startX = offset.x
-                totalX = 0f
-            },
-            onHorizontalDrag = { change, dragAmount ->
-                totalX += dragAmount
-                val threshold = 36.dp.toPx()
-                // Left edge swipe-right → open drawer
-                if (drawerState.isClosed && startX < 32.dp.toPx() && totalX > threshold) {
-                    change.consume()
-                    openLeftDrawerWithBlur()
-                }
-                // Right edge swipe-left → open stats panel
-                if (!rightPanelVisible && startX > size.width * 0.72f && totalX < -threshold) {
-                    change.consume()
-                    openRightPanelWithBlur()
-                }
+    val swipeGestureModifier = Modifier.pointerInput(drawerState, rightPanelVisible) {
+    var startX = 0f
+    var totalX = 0f
+    detectHorizontalDragGestures(
+        onDragStart = { offset ->
+            startX = offset.x
+            totalX = 0f
+        },
+        onHorizontalDrag = { change, dragAmount ->
+            totalX += dragAmount
+            val threshold = 36.dp.toPx()
+            // Left-edge swipe → open navigation drawer
+            if (drawerState.isClosed && startX < size.width * 0.3f && totalX > threshold) {
+                change.consume()
+                scope.launch { drawerState.open() }
             }
-        )
-    }
+            // Right-edge swipe → open stats panel
+            if (!rightPanelVisible && startX > size.width * 0.72f && totalX < -threshold) {
+                change.consume()
+                openRightPanelWithBlur()
+            }
+        }
+    )
+}
 
     CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap) {
     ModalNavigationDrawer(
