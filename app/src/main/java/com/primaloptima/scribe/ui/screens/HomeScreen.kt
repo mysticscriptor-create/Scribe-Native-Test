@@ -4,8 +4,16 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.VelocityTracker
+import androidx.compose.foundation.gestures.addPointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.awaitFirstDown
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.layout.onSizeChanged
+import kotlin.math.roundToInt
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -98,7 +106,14 @@ fun HomeScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-    var rightPanelVisible by remember { mutableStateOf(false) }
+    // Right panel: offset drives position.
+    // 0f = fully open (on-screen), panelWidthPx = fully closed (off-screen right).
+    // panelWidthPx is set via onSizeChanged on the panel Box once layout is measured.
+    var panelWidthPx by remember { mutableFloatStateOf(0f) }
+    val rightPanelOffset = remember { Animatable(Float.MAX_VALUE) }
+    val rightPanelVisible by remember {
+        derivedStateOf { panelWidthPx > 0f && rightPanelOffset.value < panelWidthPx * 0.999f }
+    }
     var fabExpanded by remember { mutableStateOf(false) }
 
     // ── Left drawer one-shot blur (pre-API-31) ──────────────────────────────
@@ -140,12 +155,22 @@ fun HomeScreen(
     var rightOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
     val openRightPanelWithBlur: () -> Unit = {
-        if (!rightPanelVisible) {
-            // Capture NOW on Main before the state flip causes recomposition.
+        if (!rightPanelVisible && panelWidthPx > 0f) {
+            // Capture NOW on Main before animation starts (same timing as before).
             val raw = if (needsOneShotBlur) BitmapBlur.captureOnly(view) else null
 
-            // Show the panel — barBlurBitmap in frostedPanel is the instant placeholder.
-            rightPanelVisible = true
+            // Snap offset to closed edge (in case it was at MAX_VALUE on first open),
+            // then animate to fully open.
+            scope.launch {
+                rightPanelOffset.snapTo(panelWidthPx)
+                rightPanelOffset.animateTo(
+                    0f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioLowBouncy,
+                        stiffness = Spring.StiffnessMedium
+                    )
+                )
+            }
 
             // Blur on IO and swap in once ready.
             if (raw != null) {
@@ -275,31 +300,89 @@ fun HomeScreen(
         bookToChangeCover = null
     }
 
-    // Right-edge swipe → open stats panel. Left-drawer swipe is handled natively
-    // by ModalNavigationDrawer (gesturesEnabled = true).
-    val swipeGestureModifier = Modifier.pointerInput(rightPanelVisible) {
-        var startX = 0f
-        var totalX = 0f
-        detectHorizontalDragGestures(
-            onDragStart = { offset ->
-                startX = offset.x
-                totalX = 0f
-            },
-            onHorizontalDrag = { change, dragAmount ->
-                totalX += dragAmount
-                val threshold = 36.dp.toPx()
-                if (!rightPanelVisible && startX > size.width * 0.72f && totalX < -threshold) {
-                    change.consume()
-                    openRightPanelWithBlur()
+    // Unified gesture handler:
+    //   Left  20% of screen → open left drawer  (calls drawerState.open())
+    //   Right 28% of screen → live-track right panel offset, snap on release
+    //   Middle 52%          → untouched; HorizontalPager owns it everywhere including bars
+    //   Open panel anywhere → allow swipe-right to close
+    val swipeGestureModifier = Modifier.pointerInput(Unit) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            val startX = down.position.x
+            val width = size.width.toFloat()
+            val velocityTracker = VelocityTracker()
+            velocityTracker.addPointerInputChange(down)
+            var totalX = 0f
+
+            val isLeftZone  = startX < width * 0.20f
+            val isRightZone = startX > width * 0.72f
+            val isPanelOpen = rightPanelOffset.value < panelWidthPx * 0.5f
+
+            // Middle zone and panel closed: bail — pager owns this
+            if (!isLeftZone && !isRightZone && !isPanelOpen) return@awaitEachGesture
+
+            while (true) {
+                val event = awaitPointerEvent()
+                val drag  = event.changes.firstOrNull() ?: break
+
+                if (!drag.pressed) {
+                    // ── Finger lifted: snap right panel open or closed ──
+                    if (isRightZone || isPanelOpen) {
+                        val velocity = velocityTracker.calculateVelocity().x
+                        val shouldClose =
+                            rightPanelOffset.value > panelWidthPx * 0.4f || velocity > 800f
+                        scope.launch {
+                            rightPanelOffset.animateTo(
+                                if (shouldClose) panelWidthPx else 0f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                    stiffness    = Spring.StiffnessMedium
+                                )
+                            )
+                        }
+                    }
+                    break
+                }
+
+                velocityTracker.addPointerInputChange(drag)
+                val dx = drag.positionChange().x
+                totalX += dx
+
+                when {
+                    // Left zone: open drawer once threshold crossed
+                    isLeftZone && totalX > 40.dp.toPx() -> {
+                        drag.consume()
+                        scope.launch { drawerState.open() }
+                        break
+                    }
+                    // Right zone: live-track panel position as finger moves
+                    isRightZone && panelWidthPx > 0f -> {
+                        // First movement into right zone — ensure offset starts at closed edge
+                        if (rightPanelOffset.value >= panelWidthPx * 0.999f ||
+                            rightPanelOffset.value == Float.MAX_VALUE) {
+                            scope.launch { rightPanelOffset.snapTo(panelWidthPx) }
+                        }
+                        val newOffset = (rightPanelOffset.value - dx)
+                            .coerceIn(0f, panelWidthPx)
+                        scope.launch { rightPanelOffset.snapTo(newOffset) }
+                        drag.consume()
+                    }
+                    // Panel already open: allow swipe-right to slide it closed
+                    isPanelOpen -> {
+                        val newOffset = (rightPanelOffset.value - dx)
+                            .coerceIn(0f, panelWidthPx)
+                        scope.launch { rightPanelOffset.snapTo(newOffset) }
+                        drag.consume()
+                    }
                 }
             }
-        )
+        }
     }
 
     CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap) {
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = true,
+        gesturesEnabled = false, // handled by swipeGestureModifier (left 20% zone)
         drawerContent = {
             CompositionLocalProvider(LocalOneShotBitmap provides oneShotBitmap) {
             ModalDrawerSheet(
@@ -933,90 +1016,111 @@ fun HomeScreen(
                     )
                 }
 
-                // ── Right stats panel — swipe from right edge or tap Info button ──
-                AnimatedVisibility(
-                    visible = rightPanelVisible,
-                    enter = fadeIn(tween(180)),
-                    exit = fadeOut(tween(180))
-                ) {
+                // ── Right stats panel scrim — fades proportionally as panel moves ──
+                if (rightPanelVisible) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.38f))
-                            .clickable { rightPanelVisible = false }
-                    )
-                }
-                AnimatedVisibility(
-                    visible = rightPanelVisible,
-                    modifier = Modifier.align(Alignment.CenterEnd),
-                    enter = slideInHorizontally(
-                        initialOffsetX = { it },
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioLowBouncy,
-                            stiffness = Spring.StiffnessMedium
-                        )
-                    ),
-                    exit = slideOutHorizontally(
-                        targetOffsetX = { it },
-                        animationSpec = tween(200)
-                    )
-                ) {
-                    val totalWords = remember(allNotes) {
-                        allNotes.sumOf { n -> n.content.split("\\s+".toRegex()).count { it.isNotBlank() } }
-                    }
-                    CompositionLocalProvider(LocalOneShotBitmap provides rightOneShotBitmap) {
-                    FrostedPanelContent {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .fillMaxWidth(0.72f)
-                            .frostedPanel(hazeState)
-                            .padding(horizontal = 20.dp, vertical = 24.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Overview", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                            IconButton(onClick = { rightPanelVisible = false }) {
-                                Icon(Icons.Default.Close, contentDescription = "Close")
+                            .graphicsLayer {
+                                alpha = (1f - (rightPanelOffset.value / panelWidthPx)
+                                    .coerceIn(0f, 1f)) * 0.38f / 0.38f
                             }
+                            .background(Color.Black.copy(alpha = 0.38f))
+                            .clickable {
+                                scope.launch {
+                                    rightPanelOffset.animateTo(
+                                        panelWidthPx,
+                                        animationSpec = tween(200)
+                                    )
+                                }
+                            }
+                    )
+                }
+
+                // ── Right stats panel — offset-driven, follows finger in real time ──
+                val totalWords = remember(allNotes) {
+                    allNotes.sumOf { n -> n.content.split("\\s+".toRegex()).count { it.isNotBlank() } }
+                }
+                CompositionLocalProvider(LocalOneShotBitmap provides rightOneShotBitmap) {
+                FrostedPanelContent {
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .onSizeChanged { size ->
+                            // Initialise offset to fully off-screen on first measure
+                            if (panelWidthPx == 0f) {
+                                scope.launch {
+                                    rightPanelOffset.snapTo(size.width.toFloat())
+                                }
+                            }
+                            panelWidthPx = size.width.toFloat()
                         }
-                        HorizontalDivider()
-                        StatPanelRow(Icons.Default.Book, "Books", "${allBooks.size}")
-                        StatPanelRow(Icons.Default.StickyNote2, "Notes", "${allNotes.size}")
-                        StatPanelRow(Icons.Default.TextFields, "Total words", "$totalWords")
-                        StatPanelRow(Icons.Default.FolderOpen, "Folders", "${allFolders.size}")
-                        Spacer(modifier = Modifier.weight(1f))
-                        HorizontalDivider()
-                        Text(
-                            "Quick Actions",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.outline
-                        )
-                        TextButton(
-                            onClick = { rightPanelVisible = false; onOpenSettings() },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Settings")
-                        }
-                        TextButton(
-                            onClick = { rightPanelVisible = false; onOpenThemes() },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(Icons.Default.Palette, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Themes")
+                        .offset { IntOffset(rightPanelOffset.value.roundToInt(), 0) }
+                        .fillMaxHeight()
+                        .fillMaxWidth(0.72f)
+                        .frostedPanel(hazeState)
+                        .padding(horizontal = 20.dp, vertical = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Overview", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        IconButton(onClick = {
+                            scope.launch {
+                                rightPanelOffset.animateTo(
+                                    panelWidthPx,
+                                    animationSpec = tween(200)
+                                )
+                            }
+                        }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close")
                         }
                     }
-                    } // end FrostedPanelContent for right panel
-                    } // end CompositionLocalProvider(rightOneShotBitmap for right panel)
+                    HorizontalDivider()
+                    StatPanelRow(Icons.Default.Book, "Books", "${allBooks.size}")
+                    StatPanelRow(Icons.Default.StickyNote2, "Notes", "${allNotes.size}")
+                    StatPanelRow(Icons.Default.TextFields, "Total words", "$totalWords")
+                    StatPanelRow(Icons.Default.FolderOpen, "Folders", "${allFolders.size}")
+                    Spacer(modifier = Modifier.weight(1f))
+                    HorizontalDivider()
+                    Text(
+                        "Quick Actions",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                rightPanelOffset.animateTo(panelWidthPx, animationSpec = tween(200))
+                            }
+                            onOpenSettings()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Settings")
+                    }
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                rightPanelOffset.animateTo(panelWidthPx, animationSpec = tween(200))
+                            }
+                            onOpenThemes()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Palette, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Themes")
+                    }
                 }
+                } // end FrostedPanelContent for right panel
+                } // end CompositionLocalProvider(rightOneShotBitmap for right panel)
             }
         }
     }
