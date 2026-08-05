@@ -4,16 +4,8 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.ui.input.pointer.util.VelocityTracker
-import androidx.compose.ui.input.pointer.util.addPointerInputChange
-import androidx.compose.ui.input.pointer.positionChange
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.layout.onSizeChanged
-import kotlin.math.roundToInt
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -50,7 +42,6 @@ import com.primaloptima.scribe.ui.theme.LocalAccentColor
 import android.graphics.Bitmap
 import android.os.Build
 import com.primaloptima.scribe.ui.theme.LocalHazeState
-import com.primaloptima.scribe.ui.theme.localHasBgImage
 import com.primaloptima.scribe.ui.theme.LocalOneShotBitmap
 import com.primaloptima.scribe.ui.theme.LocalBarBlurBitmap
 import com.primaloptima.scribe.ui.theme.LocalSolidSurface
@@ -62,6 +53,7 @@ import com.primaloptima.scribe.ui.theme.FrostedDialog
 import com.primaloptima.scribe.ui.theme.FrostedBarContent
 import com.primaloptima.scribe.ui.theme.FrostedPanelContent
 
+import com.primaloptima.scribe.ui.theme.localHasBgImage
 import androidx.compose.material3.LocalContentColor
 import com.primaloptima.scribe.util.BitmapBlur
 import androidx.compose.ui.platform.LocalView
@@ -80,12 +72,10 @@ import coil3.request.ImageRequest
 import coil3.request.allowHardware
 import com.primaloptima.scribe.*
 import com.primaloptima.scribe.R
-import com.primaloptima.scribe.ScribeApp
 import com.primaloptima.scribe.data.Book
 import com.primaloptima.scribe.data.Folder
 import com.primaloptima.scribe.data.Note
 import com.primaloptima.scribe.util.CoverUtils
-import com.primaloptima.scribe.util.PrefsManager
 import com.primaloptima.scribe.util.ThemeDataStoreRepo
 import com.primaloptima.scribe.viewmodel.HomeViewModel
 import kotlinx.coroutines.Dispatchers
@@ -98,7 +88,6 @@ import kotlinx.coroutines.withContext
 fun HomeScreen(
     vm: HomeViewModel,
     onOpenBook: (Book) -> Unit,
-    onOpenNote: (noteId: String, bookId: String) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenSheets: () -> Unit,
     onOpenThemes: () -> Unit
@@ -106,88 +95,47 @@ fun HomeScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-    // Right panel: offset drives position.
-    // 0f = fully open (on-screen), panelWidthPx = fully closed (off-screen right).
-    // panelWidthPx is set via onSizeChanged on the panel Box once layout is measured.
-    var panelWidthPx by remember { mutableFloatStateOf(0f) }
-    val rightPanelOffset = remember { Animatable(Float.MAX_VALUE) }
-    val rightPanelVisible by remember {
-        derivedStateOf { panelWidthPx > 0f && rightPanelOffset.value < panelWidthPx * 0.999f }
-    }
+    var rightPanelVisible by remember { mutableStateOf(false) }
     var fabExpanded by remember { mutableStateOf(false) }
 
-    // ── Left drawer one-shot blur (pre-API-31) ──────────────────────────────
-    // gesturesEnabled = true so the native drag gesture opens the drawer.
-    // barBlurBitmap (always available) is the instant frosted placeholder.
-    // oneShotBitmap improves on it with a real screen capture, taken as soon
-    // as the drawer starts opening (targetValue → Open) and cleared when it
-    // fully closes (both values → Closed).
+    // One-shot blurred capture for pre-API-31 frosted glass on the left drawer
     val view = LocalView.current
     val blurRadiusPx = com.primaloptima.scribe.ui.theme.LocalFrostedBlurRadius.current.toInt().coerceIn(1, 25)
-
-    val hazeState = LocalHazeState.current
-    val needsOneShotBlur = Build.VERSION.SDK_INT < Build.VERSION_CODES.S && localHasBgImage()
-
     var oneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var isPreparingDrawer by remember { mutableStateOf(false) }
-
-    if (needsOneShotBlur) {
-        LaunchedEffect(drawerState.targetValue) {
-            if (drawerState.targetValue == DrawerValue.Open && !isPreparingDrawer) {
-                // Drawer is starting to open — capture and blur the screen.
-                // barBlurBitmap covers the first frames while this runs on IO.
-                isPreparingDrawer = true
-                val raw = BitmapBlur.captureOnly(view)
-                oneShotBitmap = withContext(Dispatchers.IO) {
+    var captured by remember { mutableStateOf(false) }
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        LaunchedEffect(drawerState.currentValue, drawerState.targetValue) {
+            if (drawerState.targetValue == DrawerValue.Open && !captured) {
+                captured = true
+                val raw = BitmapBlur.captureOnly(view)  // must stay on Main thread
+                oneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
                 }
-                isPreparingDrawer = false
-            } else if (drawerState.targetValue == DrawerValue.Closed) {
+            } else if (drawerState.currentValue == DrawerValue.Closed &&
+                       drawerState.targetValue == DrawerValue.Closed) {
+                // Only clear when fully settled — not mid close-animation
+                captured = false
                 oneShotBitmap = null
             }
         }
     }
-
-    // ── Right panel one-shot blur (pre-API-31) ──────────────────────────────
-    // Capture on Main BEFORE the state flip triggers recomposition, blur on IO
-    // while the slide-in animation plays, then oneShotBitmap silently replaces
-    // barBlurBitmap. needsOneShotBlur already encodes the API-level check.
+    // One-shot bitmap for the right panel (same pattern as left drawer).
+    // Captured when rightPanelVisible becomes true — before the slide-in animation
+    // starts — so the panel's first frame already has a valid blur behind it.
     var rightOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
-
-    val openRightPanelWithBlur: () -> Unit = {
-        if (!rightPanelVisible && panelWidthPx > 0f) {
-            // Capture NOW on Main before animation starts (same timing as before).
-            val raw = if (needsOneShotBlur) BitmapBlur.captureOnly(view) else null
-
-            // Snap offset to closed edge (in case it was at MAX_VALUE on first open),
-            // then animate to fully open.
-            scope.launch {
-                rightPanelOffset.snapTo(panelWidthPx)
-                rightPanelOffset.animateTo(
-                    0f,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioLowBouncy,
-                        stiffness = Spring.StiffnessMedium
-                    )
-                )
-            }
-
-            // Blur on IO and swap in once ready.
-            if (raw != null) {
-                scope.launch {
-                    rightOneShotBitmap = withContext(Dispatchers.IO) {
-                        BitmapBlur.blurBitmap(raw, radius = blurRadiusPx)
-                    }
-                }
-            }
-        }
-    }
-
-    // Clear after the close animation finishes.
-    if (needsOneShotBlur) {
+    var rightCaptured by remember { mutableStateOf(false) }
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
         LaunchedEffect(rightPanelVisible) {
-            if (!rightPanelVisible) {
+            if (rightPanelVisible && !rightCaptured) {
+                rightCaptured = true
+                val raw = BitmapBlur.captureOnly(view)
+                rightOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
+                }
+            } else if (!rightPanelVisible) {
+                // Wait for the 200ms slide-out animation before clearing
                 kotlinx.coroutines.delay(250)
+                rightCaptured = false
                 rightOneShotBitmap = null
             }
         }
@@ -195,10 +143,8 @@ fun HomeScreen(
 
     val repo = remember { ThemeDataStoreRepo(context) }
 
-    // 0: Dashboard, 1: Books, 2: Notes, 3: Statistics
-    val prefs = remember { (context.applicationContext as ScribeApp).prefs }
-    val initialPage = remember { if (prefs.homeStartPage == "dashboard") 0 else 1 }
-    var selectedNavTab by remember { mutableIntStateOf(initialPage) }
+    // 0: Books, 1: Notes, 2: Statistics
+    var selectedNavTab by remember { mutableIntStateOf(0) }
     var isGridMode by remember { mutableStateOf(true) }
     var gridColumns by remember { mutableIntStateOf(2) }
 
@@ -206,7 +152,7 @@ fun HomeScreen(
         repo.gridColumnsFlow.collectLatest { gridColumns = it }
     }
 
-    val pagerState = rememberPagerState(initialPage = initialPage) { 4 }
+    val pagerState = rememberPagerState(initialPage = 0) { 3 }
     LaunchedEffect(pagerState.currentPage) {
         selectedNavTab = pagerState.currentPage
     }
@@ -300,89 +246,37 @@ fun HomeScreen(
         bookToChangeCover = null
     }
 
-    // Unified gesture handler:
-    //   Left  20% of screen → open left drawer  (calls drawerState.open())
-    //   Right 28% of screen → live-track right panel offset, snap on release
-    //   Middle 52%          → untouched; HorizontalPager owns it everywhere including bars
-    //   Open panel anywhere → allow swipe-right to close
-    val swipeGestureModifier = Modifier.pointerInput(Unit) {
-        awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false)
-            val startX = down.position.x
-            val width = size.width.toFloat()
-            val velocityTracker = VelocityTracker()
-            velocityTracker.addPointerInputChange(down)
-            var totalX = 0f
-
-            val isLeftZone  = startX < width * 0.20f
-            val isRightZone = startX > width * 0.72f
-            val isPanelOpen = rightPanelOffset.value < panelWidthPx * 0.5f
-
-            // Middle zone and panel closed: bail — pager owns this
-            if (!isLeftZone && !isRightZone && !isPanelOpen) return@awaitEachGesture
-
-            while (true) {
-                val event = awaitPointerEvent()
-                val drag  = event.changes.firstOrNull() ?: break
-
-                if (!drag.pressed) {
-                    // ── Finger lifted: snap right panel open or closed ──
-                    if (isRightZone || isPanelOpen) {
-                        val velocity = velocityTracker.calculateVelocity().x
-                        val shouldClose =
-                            rightPanelOffset.value > panelWidthPx * 0.4f || velocity > 800f
-                        scope.launch {
-                            rightPanelOffset.animateTo(
-                                if (shouldClose) panelWidthPx else 0f,
-                                animationSpec = spring(
-                                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                                    stiffness    = Spring.StiffnessMedium
-                                )
-                            )
-                        }
-                    }
-                    break
+    val swipeGestureModifier = Modifier.pointerInput(drawerState, rightPanelVisible) {
+        var startX = 0f
+        var totalX = 0f
+        detectHorizontalDragGestures(
+            onDragStart = { offset ->
+                startX = offset.x
+                totalX = 0f
+            },
+            onHorizontalDrag = { change, dragAmount ->
+                totalX += dragAmount
+                val threshold = 36.dp.toPx()
+                // Left-edge swipe → open navigation drawer
+                if (drawerState.isClosed && startX < size.width * 0.3f && totalX > threshold) {
+                    change.consume()
+                    scope.launch { drawerState.open() }
                 }
-
-                velocityTracker.addPointerInputChange(drag)
-                val dx = drag.positionChange().x
-                totalX += dx
-
-                when {
-                    // Left zone: open drawer once threshold crossed
-                    isLeftZone && totalX > 40.dp.toPx() -> {
-                        drag.consume()
-                        scope.launch { drawerState.open() }
-                        break
-                    }
-                    // Right zone: live-track panel position as finger moves
-                    isRightZone && panelWidthPx > 0f -> {
-                        // First movement into right zone — ensure offset starts at closed edge
-                        if (rightPanelOffset.value >= panelWidthPx * 0.999f ||
-                            rightPanelOffset.value == Float.MAX_VALUE) {
-                            scope.launch { rightPanelOffset.snapTo(panelWidthPx) }
-                        }
-                        val newOffset = (rightPanelOffset.value - dx)
-                            .coerceIn(0f, panelWidthPx)
-                        scope.launch { rightPanelOffset.snapTo(newOffset) }
-                        drag.consume()
-                    }
-                    // Panel already open: allow swipe-right to slide it closed
-                    isPanelOpen -> {
-                        val newOffset = (rightPanelOffset.value - dx)
-                            .coerceIn(0f, panelWidthPx)
-                        scope.launch { rightPanelOffset.snapTo(newOffset) }
-                        drag.consume()
-                    }
+                // Right-edge swipe → open stats panel
+                if (!rightPanelVisible && startX > size.width * 0.72f && totalX < -threshold) {
+                    change.consume()
+                    rightPanelVisible = true
                 }
             }
-        }
+        )
     }
+
+    val hazeState = LocalHazeState.current
 
     CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap) {
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = false, // handled by swipeGestureModifier (left 20% zone)
+        gesturesEnabled = true,
         drawerContent = {
             CompositionLocalProvider(LocalOneShotBitmap provides oneShotBitmap) {
             ModalDrawerSheet(
@@ -611,14 +505,14 @@ fun HomeScreen(
                     },
                     actions = {
                         if (!isSearching) {
-                            IconButton(onClick = { openRightPanelWithBlur() }) {
+                            IconButton(onClick = { rightPanelVisible = !rightPanelVisible }) {
                                 Icon(Icons.Default.Info, contentDescription = "Overview")
                             }
                             IconButton(onClick = { isSearching = true }) {
                                 Icon(Icons.Default.Search, contentDescription = "Search")
                             }
                         }
-                        if (selectedNavTab == 1 && !isSearching) {
+                        if (selectedNavTab == 0 && !isSearching) {
                             if (isGridMode) {
                                 IconButton(onClick = {
                                     val nextCols = if (gridColumns == 2) 3 else 2
@@ -706,8 +600,8 @@ fun HomeScreen(
                             isSearching = false
                             scope.launch { pagerState.animateScrollToPage(0) }
                         },
-                        icon = { Icon(Icons.Default.Dashboard, contentDescription = "Dashboard") },
-                        label = { Text("Dashboard", fontSize = 10.sp) },
+                        icon = { Icon(Icons.Default.Book, contentDescription = "Books") },
+                        label = { Text("Books", fontSize = 10.sp) },
                         colors = navColors
                     )
                     NavigationBarItem(
@@ -717,8 +611,8 @@ fun HomeScreen(
                             isSearching = false
                             scope.launch { pagerState.animateScrollToPage(1) }
                         },
-                        icon = { Icon(Icons.Default.Book, contentDescription = "Books") },
-                        label = { Text("Books", fontSize = 10.sp) },
+                        icon = { Icon(Icons.Default.StickyNote2, contentDescription = "Notes") },
+                        label = { Text("Notes", fontSize = 10.sp) },
                         colors = navColors
                     )
                     NavigationBarItem(
@@ -727,17 +621,6 @@ fun HomeScreen(
                             selectedNavTab = 2
                             isSearching = false
                             scope.launch { pagerState.animateScrollToPage(2) }
-                        },
-                        icon = { Icon(Icons.Default.StickyNote2, contentDescription = "Notes") },
-                        label = { Text("Notes", fontSize = 10.sp) },
-                        colors = navColors
-                    )
-                    NavigationBarItem(
-                        selected = selectedNavTab == 3 && !isSearching,
-                        onClick = {
-                            selectedNavTab = 3
-                            isSearching = false
-                            scope.launch { pagerState.animateScrollToPage(3) }
                         },
                         icon = { Icon(Icons.Default.BarChart, contentDescription = "Statistics") },
                         label = { Text("Statistics", fontSize = 10.sp) },
@@ -762,8 +645,7 @@ fun HomeScreen(
                     label = "fabSwitch"
                 ) { tab ->
                     when (tab) {
-                        0 -> Box(Modifier) // Dashboard — no FAB; actions live inside the screen
-                        1 -> {
+                        0 -> {
                             // ── Morph speed-dial FAB ──
                             AnimatedContent(
                                 targetState = fabExpanded,
@@ -903,7 +785,7 @@ fun HomeScreen(
                                 }
                             }
                         }
-                        2 -> ExtendedFloatingActionButton(
+                        1 -> ExtendedFloatingActionButton(
                             onClick = {
                                 vm.createQuickNote { note ->
                                     context.startActivity(
@@ -952,22 +834,7 @@ fun HomeScreen(
                             .then(if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier)
                     ) { page ->
                         when (page) {
-                            0 -> DashboardTabContent(
-                                vm = vm,
-                                allBooks = allBooks,
-                                onOpenNote = onOpenNote,
-                                onOpenBook = onOpenBook,
-                                onGoToStats = {
-                                    selectedNavTab = 3
-                                    scope.launch { pagerState.animateScrollToPage(3) }
-                                },
-                                onGoToBooks = {
-                                    selectedNavTab = 1
-                                    scope.launch { pagerState.animateScrollToPage(1) }
-                                },
-                                onOpenSheets = onOpenSheets
-                            )
-                            1 -> BooksTabContent(
+                            0 -> BooksTabContent(
                                 books = vm.sortedBooks(allBooks),
                                 isGridMode = isGridMode,
                                 gridColumns = gridColumns,
@@ -983,7 +850,7 @@ fun HomeScreen(
                                 },
                                 onDelete = { book -> scope.launch { captureForDialog { bookToDelete = book } } }
                             )
-                            2 -> NotesTabContent(
+                            1 -> NotesTabContent(
                                 allNotes = allNotes,
                                 onOpenNote = { note ->
                                     context.startActivity(
@@ -993,7 +860,7 @@ fun HomeScreen(
                                     )
                                 }
                             )
-                            3 -> MainStatisticsTabContent(
+                            2 -> MainStatisticsTabContent(
                                 allBooks = allBooks,
                                 allNotes = allNotes,
                                 allFolders = allFolders
@@ -1004,7 +871,7 @@ fun HomeScreen(
 
                 // ── FAB speed-dial scrim — fades in behind the card, above pager ──
                 AnimatedVisibility(
-                    visible = fabExpanded && selectedNavTab == 1,
+                    visible = fabExpanded && selectedNavTab == 0,
                     enter = fadeIn(tween(200)),
                     exit = fadeOut(tween(200))
                 ) {
@@ -1016,111 +883,90 @@ fun HomeScreen(
                     )
                 }
 
-                // ── Right stats panel scrim — fades proportionally as panel moves ──
-                if (rightPanelVisible) {
+                // ── Right stats panel — swipe from right edge or tap Info button ──
+                AnimatedVisibility(
+                    visible = rightPanelVisible,
+                    enter = fadeIn(tween(180)),
+                    exit = fadeOut(tween(180))
+                ) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .graphicsLayer {
-                                alpha = (1f - (rightPanelOffset.value / panelWidthPx)
-                                    .coerceIn(0f, 1f)) * 0.38f / 0.38f
-                            }
                             .background(Color.Black.copy(alpha = 0.38f))
-                            .clickable {
-                                scope.launch {
-                                    rightPanelOffset.animateTo(
-                                        panelWidthPx,
-                                        animationSpec = tween(200)
-                                    )
-                                }
-                            }
+                            .clickable { rightPanelVisible = false }
                     )
                 }
-
-                // ── Right stats panel — offset-driven, follows finger in real time ──
-                val totalWords = remember(allNotes) {
-                    allNotes.sumOf { n -> n.content.split("\\s+".toRegex()).count { it.isNotBlank() } }
-                }
-                CompositionLocalProvider(LocalOneShotBitmap provides rightOneShotBitmap) {
-                FrostedPanelContent {
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .onSizeChanged { size ->
-                            // Initialise offset to fully off-screen on first measure
-                            if (panelWidthPx == 0f) {
-                                scope.launch {
-                                    rightPanelOffset.snapTo(size.width.toFloat())
-                                }
-                            }
-                            panelWidthPx = size.width.toFloat()
-                        }
-                        .offset { IntOffset(rightPanelOffset.value.roundToInt(), 0) }
-                        .fillMaxHeight()
-                        .fillMaxWidth(0.72f)
-                        .frostedPanel(hazeState)
-                        .padding(horizontal = 20.dp, vertical = 24.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                AnimatedVisibility(
+                    visible = rightPanelVisible,
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                    enter = slideInHorizontally(
+                        initialOffsetX = { it },
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioLowBouncy,
+                            stiffness = Spring.StiffnessMedium
+                        )
+                    ),
+                    exit = slideOutHorizontally(
+                        targetOffsetX = { it },
+                        animationSpec = tween(200)
+                    )
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                    val totalWords = remember(allNotes) {
+                        allNotes.sumOf { n -> n.content.split("\\s+".toRegex()).count { it.isNotBlank() } }
+                    }
+                    CompositionLocalProvider(LocalOneShotBitmap provides rightOneShotBitmap) {
+                    FrostedPanelContent {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(0.72f)
+                            .frostedPanel(hazeState)
+                            .padding(horizontal = 20.dp, vertical = 24.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        Text("Overview", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                        IconButton(onClick = {
-                            scope.launch {
-                                rightPanelOffset.animateTo(
-                                    panelWidthPx,
-                                    animationSpec = tween(200)
-                                )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Overview", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                            IconButton(onClick = { rightPanelVisible = false }) {
+                                Icon(Icons.Default.Close, contentDescription = "Close")
                             }
-                        }) {
-                            Icon(Icons.Default.Close, contentDescription = "Close")
+                        }
+                        HorizontalDivider()
+                        StatPanelRow(Icons.Default.Book, "Books", "${allBooks.size}")
+                        StatPanelRow(Icons.Default.StickyNote2, "Notes", "${allNotes.size}")
+                        StatPanelRow(Icons.Default.TextFields, "Total words", "$totalWords")
+                        StatPanelRow(Icons.Default.FolderOpen, "Folders", "${allFolders.size}")
+                        Spacer(modifier = Modifier.weight(1f))
+                        HorizontalDivider()
+                        Text(
+                            "Quick Actions",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                        TextButton(
+                            onClick = { rightPanelVisible = false; onOpenSettings() },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Settings")
+                        }
+                        TextButton(
+                            onClick = { rightPanelVisible = false; onOpenThemes() },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Palette, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Themes")
                         }
                     }
-                    HorizontalDivider()
-                    StatPanelRow(Icons.Default.Book, "Books", "${allBooks.size}")
-                    StatPanelRow(Icons.Default.StickyNote2, "Notes", "${allNotes.size}")
-                    StatPanelRow(Icons.Default.TextFields, "Total words", "$totalWords")
-                    StatPanelRow(Icons.Default.FolderOpen, "Folders", "${allFolders.size}")
-                    Spacer(modifier = Modifier.weight(1f))
-                    HorizontalDivider()
-                    Text(
-                        "Quick Actions",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.outline
-                    )
-                    TextButton(
-                        onClick = {
-                            scope.launch {
-                                rightPanelOffset.animateTo(panelWidthPx, animationSpec = tween(200))
-                            }
-                            onOpenSettings()
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Settings")
-                    }
-                    TextButton(
-                        onClick = {
-                            scope.launch {
-                                rightPanelOffset.animateTo(panelWidthPx, animationSpec = tween(200))
-                            }
-                            onOpenThemes()
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.Palette, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Themes")
-                    }
+                    } // end FrostedPanelContent for right panel
+                    } // end CompositionLocalProvider(rightOneShotBitmap for right panel)
                 }
-                } // end FrostedPanelContent for right panel
-                } // end CompositionLocalProvider(rightOneShotBitmap for right panel)
             }
         }
     }
