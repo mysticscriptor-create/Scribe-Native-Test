@@ -42,6 +42,7 @@ import com.primaloptima.scribe.ui.theme.LocalAccentColor
 import android.graphics.Bitmap
 import android.os.Build
 import com.primaloptima.scribe.ui.theme.LocalHazeState
+import com.primaloptima.scribe.ui.theme.localHasBgImage
 import com.primaloptima.scribe.ui.theme.LocalOneShotBitmap
 import com.primaloptima.scribe.ui.theme.LocalBarBlurBitmap
 import com.primaloptima.scribe.ui.theme.LocalSolidSurface
@@ -53,7 +54,6 @@ import com.primaloptima.scribe.ui.theme.FrostedDialog
 import com.primaloptima.scribe.ui.theme.FrostedBarContent
 import com.primaloptima.scribe.ui.theme.FrostedPanelContent
 
-import com.primaloptima.scribe.ui.theme.localHasBgImage
 import androidx.compose.material3.LocalContentColor
 import com.primaloptima.scribe.util.BitmapBlur
 import androidx.compose.ui.platform.LocalView
@@ -72,10 +72,12 @@ import coil3.request.ImageRequest
 import coil3.request.allowHardware
 import com.primaloptima.scribe.*
 import com.primaloptima.scribe.R
+import com.primaloptima.scribe.ScribeApp
 import com.primaloptima.scribe.data.Book
 import com.primaloptima.scribe.data.Folder
 import com.primaloptima.scribe.data.Note
 import com.primaloptima.scribe.util.CoverUtils
+import com.primaloptima.scribe.util.PrefsManager
 import com.primaloptima.scribe.util.ThemeDataStoreRepo
 import com.primaloptima.scribe.viewmodel.HomeViewModel
 import kotlinx.coroutines.Dispatchers
@@ -88,6 +90,7 @@ import kotlinx.coroutines.withContext
 fun HomeScreen(
     vm: HomeViewModel,
     onOpenBook: (Book) -> Unit,
+    onOpenNote: (noteId: String, bookId: String) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenSheets: () -> Unit,
     onOpenThemes: () -> Unit
@@ -141,10 +144,14 @@ fun HomeScreen(
         }
     }
 
+    val hazeState = LocalHazeState.current
+
     val repo = remember { ThemeDataStoreRepo(context) }
 
-    // 0: Books, 1: Notes, 2: Statistics
-    var selectedNavTab by remember { mutableIntStateOf(0) }
+    // 0: Dashboard, 1: Books, 2: Notes, 3: Statistics
+    val prefs = remember { (context.applicationContext as ScribeApp).prefs }
+    val initialPage = remember { if (prefs.homeStartPage == "dashboard") 0 else 1 }
+    var selectedNavTab by remember { mutableIntStateOf(initialPage) }
     var isGridMode by remember { mutableStateOf(true) }
     var gridColumns by remember { mutableIntStateOf(2) }
 
@@ -152,7 +159,7 @@ fun HomeScreen(
         repo.gridColumnsFlow.collectLatest { gridColumns = it }
     }
 
-    val pagerState = rememberPagerState(initialPage = 0) { 3 }
+    val pagerState = rememberPagerState(initialPage = initialPage) { 4 }
     LaunchedEffect(pagerState.currentPage) {
         selectedNavTab = pagerState.currentPage
     }
@@ -270,8 +277,6 @@ fun HomeScreen(
             }
         )
     }
-
-    val hazeState = LocalHazeState.current
 
     CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap) {
     ModalNavigationDrawer(
@@ -505,14 +510,14 @@ fun HomeScreen(
                     },
                     actions = {
                         if (!isSearching) {
-                            IconButton(onClick = { rightPanelVisible = !rightPanelVisible }) {
+                            IconButton(onClick = { rightPanelVisible = true }) {
                                 Icon(Icons.Default.Info, contentDescription = "Overview")
                             }
                             IconButton(onClick = { isSearching = true }) {
                                 Icon(Icons.Default.Search, contentDescription = "Search")
                             }
                         }
-                        if (selectedNavTab == 0 && !isSearching) {
+                        if (selectedNavTab == 1 && !isSearching) {
                             if (isGridMode) {
                                 IconButton(onClick = {
                                     val nextCols = if (gridColumns == 2) 3 else 2
@@ -600,8 +605,8 @@ fun HomeScreen(
                             isSearching = false
                             scope.launch { pagerState.animateScrollToPage(0) }
                         },
-                        icon = { Icon(Icons.Default.Book, contentDescription = "Books") },
-                        label = { Text("Books", fontSize = 10.sp) },
+                        icon = { Icon(Icons.Default.Dashboard, contentDescription = "Dashboard") },
+                        label = { Text("Dashboard", fontSize = 10.sp) },
                         colors = navColors
                     )
                     NavigationBarItem(
@@ -611,8 +616,8 @@ fun HomeScreen(
                             isSearching = false
                             scope.launch { pagerState.animateScrollToPage(1) }
                         },
-                        icon = { Icon(Icons.Default.StickyNote2, contentDescription = "Notes") },
-                        label = { Text("Notes", fontSize = 10.sp) },
+                        icon = { Icon(Icons.Default.Book, contentDescription = "Books") },
+                        label = { Text("Books", fontSize = 10.sp) },
                         colors = navColors
                     )
                     NavigationBarItem(
@@ -621,6 +626,17 @@ fun HomeScreen(
                             selectedNavTab = 2
                             isSearching = false
                             scope.launch { pagerState.animateScrollToPage(2) }
+                        },
+                        icon = { Icon(Icons.Default.StickyNote2, contentDescription = "Notes") },
+                        label = { Text("Notes", fontSize = 10.sp) },
+                        colors = navColors
+                    )
+                    NavigationBarItem(
+                        selected = selectedNavTab == 3 && !isSearching,
+                        onClick = {
+                            selectedNavTab = 3
+                            isSearching = false
+                            scope.launch { pagerState.animateScrollToPage(3) }
                         },
                         icon = { Icon(Icons.Default.BarChart, contentDescription = "Statistics") },
                         label = { Text("Statistics", fontSize = 10.sp) },
@@ -645,7 +661,8 @@ fun HomeScreen(
                     label = "fabSwitch"
                 ) { tab ->
                     when (tab) {
-                        0 -> {
+                        0 -> Box(Modifier) // Dashboard — no FAB; actions live inside the screen
+                        1 -> {
                             // ── Morph speed-dial FAB ──
                             AnimatedContent(
                                 targetState = fabExpanded,
@@ -785,7 +802,7 @@ fun HomeScreen(
                                 }
                             }
                         }
-                        1 -> ExtendedFloatingActionButton(
+                        2 -> ExtendedFloatingActionButton(
                             onClick = {
                                 vm.createQuickNote { note ->
                                     context.startActivity(
@@ -834,7 +851,22 @@ fun HomeScreen(
                             .then(if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier)
                     ) { page ->
                         when (page) {
-                            0 -> BooksTabContent(
+                            0 -> DashboardTabContent(
+                                vm = vm,
+                                allBooks = allBooks,
+                                onOpenNote = onOpenNote,
+                                onOpenBook = onOpenBook,
+                                onGoToStats = {
+                                    selectedNavTab = 3
+                                    scope.launch { pagerState.animateScrollToPage(3) }
+                                },
+                                onGoToBooks = {
+                                    selectedNavTab = 1
+                                    scope.launch { pagerState.animateScrollToPage(1) }
+                                },
+                                onOpenSheets = onOpenSheets
+                            )
+                            1 -> BooksTabContent(
                                 books = vm.sortedBooks(allBooks),
                                 isGridMode = isGridMode,
                                 gridColumns = gridColumns,
@@ -850,7 +882,7 @@ fun HomeScreen(
                                 },
                                 onDelete = { book -> scope.launch { captureForDialog { bookToDelete = book } } }
                             )
-                            1 -> NotesTabContent(
+                            2 -> NotesTabContent(
                                 allNotes = allNotes,
                                 onOpenNote = { note ->
                                     context.startActivity(
@@ -860,7 +892,7 @@ fun HomeScreen(
                                     )
                                 }
                             )
-                            2 -> MainStatisticsTabContent(
+                            3 -> MainStatisticsTabContent(
                                 allBooks = allBooks,
                                 allNotes = allNotes,
                                 allFolders = allFolders
@@ -871,7 +903,7 @@ fun HomeScreen(
 
                 // ── FAB speed-dial scrim — fades in behind the card, above pager ──
                 AnimatedVisibility(
-                    visible = fabExpanded && selectedNavTab == 0,
+                    visible = fabExpanded && selectedNavTab == 1,
                     enter = fadeIn(tween(200)),
                     exit = fadeOut(tween(200))
                 ) {
@@ -883,11 +915,11 @@ fun HomeScreen(
                     )
                 }
 
-                // ── Right stats panel — swipe from right edge or tap Info button ──
+                // ── Right stats panel scrim ──
                 AnimatedVisibility(
                     visible = rightPanelVisible,
-                    enter = fadeIn(tween(180)),
-                    exit = fadeOut(tween(180))
+                    enter = fadeIn(tween(200)),
+                    exit = fadeOut(tween(200))
                 ) {
                     Box(
                         modifier = Modifier
@@ -896,77 +928,76 @@ fun HomeScreen(
                             .clickable { rightPanelVisible = false }
                     )
                 }
+
+                // ── Right stats panel ──
+                val totalWords = remember(allNotes) {
+                    allNotes.sumOf { n -> n.content.split("\\s+".toRegex()).count { it.isNotBlank() } }
+                }
                 AnimatedVisibility(
                     visible = rightPanelVisible,
                     modifier = Modifier.align(Alignment.CenterEnd),
-                    enter = slideInHorizontally(
-                        initialOffsetX = { it },
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioLowBouncy,
-                            stiffness = Spring.StiffnessMedium
-                        )
-                    ),
-                    exit = slideOutHorizontally(
-                        targetOffsetX = { it },
-                        animationSpec = tween(200)
-                    )
+                    enter = slideInHorizontally(initialOffsetX = { it }, animationSpec = tween(200)),
+                    exit = slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(200))
                 ) {
-                    val totalWords = remember(allNotes) {
-                        allNotes.sumOf { n -> n.content.split("\\s+".toRegex()).count { it.isNotBlank() } }
-                    }
-                    CompositionLocalProvider(LocalOneShotBitmap provides rightOneShotBitmap) {
-                    FrostedPanelContent {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .fillMaxWidth(0.72f)
-                            .frostedPanel(hazeState)
-                            .padding(horizontal = 20.dp, vertical = 24.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                CompositionLocalProvider(LocalOneShotBitmap provides rightOneShotBitmap) {
+                FrostedPanelContent {
+                Column(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(0.72f)
+                        .frostedPanel(hazeState)
+                        .padding(horizontal = 20.dp, vertical = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Overview", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                            IconButton(onClick = { rightPanelVisible = false }) {
-                                Icon(Icons.Default.Close, contentDescription = "Close")
-                            }
-                        }
-                        HorizontalDivider()
-                        StatPanelRow(Icons.Default.Book, "Books", "${allBooks.size}")
-                        StatPanelRow(Icons.Default.StickyNote2, "Notes", "${allNotes.size}")
-                        StatPanelRow(Icons.Default.TextFields, "Total words", "$totalWords")
-                        StatPanelRow(Icons.Default.FolderOpen, "Folders", "${allFolders.size}")
-                        Spacer(modifier = Modifier.weight(1f))
-                        HorizontalDivider()
-                        Text(
-                            "Quick Actions",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.outline
-                        )
-                        TextButton(
-                            onClick = { rightPanelVisible = false; onOpenSettings() },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Settings")
-                        }
-                        TextButton(
-                            onClick = { rightPanelVisible = false; onOpenThemes() },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(Icons.Default.Palette, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Themes")
+                        Text("Overview", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        IconButton(onClick = { rightPanelVisible = false }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close")
                         }
                     }
-                    } // end FrostedPanelContent for right panel
-                    } // end CompositionLocalProvider(rightOneShotBitmap for right panel)
+                    HorizontalDivider()
+                    StatPanelRow(Icons.Default.Book, "Books", "${allBooks.size}")
+                    StatPanelRow(Icons.Default.StickyNote2, "Notes", "${allNotes.size}")
+                    StatPanelRow(Icons.Default.TextFields, "Total words", "$totalWords")
+                    StatPanelRow(Icons.Default.FolderOpen, "Folders", "${allFolders.size}")
+                    Spacer(modifier = Modifier.weight(1f))
+                    HorizontalDivider()
+                    Text(
+                        "Quick Actions",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                    TextButton(
+                        onClick = {
+                            rightPanelVisible = false
+                            onOpenSettings()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Settings")
+                    }
+                    TextButton(
+                        onClick = {
+                            rightPanelVisible = false
+                            onOpenThemes()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Palette, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Themes")
+                    }
                 }
+                } // end FrostedPanelContent for right panel
+                } // end CompositionLocalProvider(rightOneShotBitmap for right panel)
+                } // end AnimatedVisibility for right panel
             }
         }
     }
