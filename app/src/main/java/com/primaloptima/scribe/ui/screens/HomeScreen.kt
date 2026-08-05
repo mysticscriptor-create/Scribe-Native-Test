@@ -102,11 +102,11 @@ fun HomeScreen(
     var fabExpanded by remember { mutableStateOf(false) }
 
     // ── Left drawer one-shot blur (pre-API-31) ──────────────────────────────
-    // gesturesEnabled = true so the native drag gesture opens the drawer.
-    // barBlurBitmap (always available) is the instant frosted placeholder.
-    // oneShotBitmap improves on it with a real screen capture, taken as soon
-    // as the drawer starts opening (targetValue → Open) and cleared when it
-    // fully closes (both values → Closed).
+    // gesturesEnabled = false on ModalNavigationDrawer; left-edge swipes are
+    // intercepted manually by swipeGestureModifier (see below) so we can call
+    // captureOnly BEFORE drawerState.open() — giving a clean frame identical
+    // in timing to openRightPanelWithBlur. barBlurBitmap is the instant
+    // placeholder; oneShotBitmap crossfades in via drawWithCrossfadeBitmaps.
     val view = LocalView.current
     val blurRadiusPx = com.primaloptima.scribe.ui.theme.LocalFrostedBlurRadius.current.toInt().coerceIn(1, 25)
 
@@ -114,21 +114,33 @@ fun HomeScreen(
     val needsOneShotBlur = Build.VERSION.SDK_INT < Build.VERSION_CODES.S && localHasBgImage()
 
     var oneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var isPreparingDrawer by remember { mutableStateOf(false) }
 
+    // Clear the one-shot bitmap once the drawer has fully closed.
     if (needsOneShotBlur) {
-        LaunchedEffect(drawerState.targetValue) {
-            if (drawerState.targetValue == DrawerValue.Open && !isPreparingDrawer) {
-                // Drawer is starting to open — capture and blur the screen.
-                // barBlurBitmap covers the first frames while this runs on IO.
-                isPreparingDrawer = true
-                val raw = BitmapBlur.captureOnly(view)
-                oneShotBitmap = withContext(Dispatchers.IO) {
-                    raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
-                }
-                isPreparingDrawer = false
-            } else if (drawerState.targetValue == DrawerValue.Closed) {
+        LaunchedEffect(drawerState.currentValue) {
+            if (drawerState.currentValue == DrawerValue.Closed) {
                 oneShotBitmap = null
+            }
+        }
+    }
+
+    // ── Left drawer open with clean-frame capture ───────────────────────────
+    // Captures on Main synchronously BEFORE launching drawerState.open(), so
+    // captureOnly sees the screen with zero drawer content — identical timing
+    // to openRightPanelWithBlur. The two scope.launch calls run concurrently:
+    // one animates the drawer open, one blurs the raw bitmap on IO.
+    val openLeftDrawerWithBlur: () -> Unit = {
+        if (drawerState.isClosed) {
+            val raw = if (needsOneShotBlur) BitmapBlur.captureOnly(view) else null
+            // Start the open animation immediately — don't wait for blur to finish.
+            scope.launch { drawerState.open() }
+            // Blur on IO; barBlurBitmap covers the early frames via drawWithCrossfadeBitmaps.
+            if (raw != null) {
+                scope.launch {
+                    oneShotBitmap = withContext(Dispatchers.IO) {
+                        BitmapBlur.blurBitmap(raw, radius = blurRadiusPx)
+                    }
+                }
             }
         }
     }
@@ -275,8 +287,10 @@ fun HomeScreen(
         bookToChangeCover = null
     }
 
-    // Right-edge swipe → open stats panel. Left-drawer swipe is handled natively
-    // by ModalNavigationDrawer (gesturesEnabled = true).
+    // Handles both edge swipes now that gesturesEnabled = false on ModalNavigationDrawer:
+    //   Left edge  swipe-right → openLeftDrawerWithBlur (captures clean frame first)
+    //   Right edge swipe-left  → openRightPanelWithBlur (unchanged)
+    // 32 dp left grab-zone matches the standard Android edge-gesture width.
     val swipeGestureModifier = Modifier.pointerInput(rightPanelVisible) {
         var startX = 0f
         var totalX = 0f
@@ -288,6 +302,12 @@ fun HomeScreen(
             onHorizontalDrag = { change, dragAmount ->
                 totalX += dragAmount
                 val threshold = 36.dp.toPx()
+                // Left edge swipe-right → open drawer
+                if (drawerState.isClosed && startX < 32.dp.toPx() && totalX > threshold) {
+                    change.consume()
+                    openLeftDrawerWithBlur()
+                }
+                // Right edge swipe-left → open stats panel
                 if (!rightPanelVisible && startX > size.width * 0.72f && totalX < -threshold) {
                     change.consume()
                     openRightPanelWithBlur()
@@ -299,7 +319,7 @@ fun HomeScreen(
     CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap) {
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = true,
+        gesturesEnabled = false,
         drawerContent = {
             CompositionLocalProvider(LocalOneShotBitmap provides oneShotBitmap) {
             ModalDrawerSheet(

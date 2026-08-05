@@ -7,6 +7,7 @@ import android.graphics.RenderEffect as AndroidRenderEffect
 import android.graphics.Shader
 import android.os.Build
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -300,15 +301,12 @@ fun Modifier.frostedPanel(hazeState: HazeState?): Modifier {
             state = hazeState,
             style = HazeStyle(blurRadius = blurRadius.dp, tint = HazeTint(tintColor), noiseFactor = 0f)
         )
-    } else if (oneShotBitmap != null) {
-        // Real screen capture is ready — use it for pixel-perfect frosted look.
-        this.drawWithOneShotBitmap(oneShotBitmap, tintColor)
     } else if (barBlurBitmap != null) {
-        // oneShotBitmap not yet ready (capture still in flight) — use the
-        // pre-blurred wallpaper bitmap as an instant placeholder. This covers
-        // the first frames while the async capture completes, so the panel is
-        // never blank or solid-tinted on pre-API-31 devices.
-        this.drawWithOneShotBitmap(barBlurBitmap, tintColor)
+        // barBlurBitmap is always the instant placeholder (derived from the Coil bitmap,
+        // available as soon as the theme loads). oneShotBitmap starts null and arrives
+        // asynchronously after the screen capture finishes; drawWithCrossfadeBitmaps
+        // animates between the two so there is never a hard visual swap.
+        this.drawWithCrossfadeBitmaps(barBlurBitmap, oneShotBitmap, tintColor)
     } else {
         this.background(solidSurface.copy(alpha = 0.95f))
     }
@@ -606,6 +604,75 @@ fun Modifier.drawWithOneShotBitmap(bitmap: Bitmap, tint: Color): Modifier {
             // Tint overlay — gives the surface colour bleed that makes it feel glassy
             drawRect(tint)
             // Draw the composable's own content on top (text, icons etc.)
+            drawContent()
+        }
+}
+
+/**
+ * Crossfades between [fromBitmap] (always-ready placeholder, typically [LocalBarBlurBitmap])
+ * and [toBitmap] (higher-quality one-shot capture, typically [LocalOneShotBitmap]).
+ *
+ * While [toBitmap] is null the modifier renders identically to [drawWithOneShotBitmap] on
+ * [fromBitmap] — no visible difference, no extra overhead. Once [toBitmap] becomes non-null
+ * a 280 ms alpha crossfade runs: [fromBitmap] fades out as [toBitmap] fades in, so the
+ * swap is never a sudden hard cut.
+ *
+ * Used exclusively by [frostedPanel] to eliminate the jarring bitmap-swap that occurred
+ * when the async one-shot capture completed mid-animation.
+ */
+@Composable
+fun Modifier.drawWithCrossfadeBitmaps(
+    fromBitmap: Bitmap,
+    toBitmap: Bitmap?,
+    tint: Color
+): Modifier {
+    val alpha by animateFloatAsState(
+        targetValue = if (toBitmap != null) 1f else 0f,
+        animationSpec = tween(durationMillis = 280),
+        label = "oneShotCrossfade"
+    )
+    var screenOffset by remember { mutableStateOf(androidx.compose.ui.unit.IntOffset.Zero) }
+    var rootSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    return this
+        .onGloballyPositioned { coords ->
+            screenOffset = coords.positionInRoot().let {
+                androidx.compose.ui.unit.IntOffset(it.x.toInt(), it.y.toInt())
+            }
+            var root = coords
+            while (root.parentCoordinates != null) root = root.parentCoordinates!!
+            rootSize = root.size
+        }
+        .drawWithContent {
+            // Shared helper: draw the correctly-cropped slice of a bitmap at the given alpha.
+            fun drawSlice(bitmap: Bitmap, drawAlpha: Float) {
+                val bitmapW = bitmap.width.toFloat()
+                val bitmapH = bitmap.height.toFloat()
+                val screenW = if (rootSize.width > 0) rootSize.width.toFloat() else bitmapW
+                val screenH = if (rootSize.height > 0) rootSize.height.toFloat() else bitmapH
+                val srcLeft   = (screenOffset.x.toFloat() / screenW * bitmapW).coerceIn(0f, bitmapW)
+                val srcTop    = (screenOffset.y.toFloat() / screenH * bitmapH).coerceIn(0f, bitmapH)
+                val srcRight  = ((screenOffset.x + size.width)  / screenW * bitmapW).coerceIn(0f, bitmapW)
+                val srcBottom = ((screenOffset.y + size.height) / screenH * bitmapH).coerceIn(0f, bitmapH)
+                if (srcRight > srcLeft && srcBottom > srcTop) {
+                    drawImage(
+                        image     = bitmap.asImageBitmap(),
+                        srcOffset = androidx.compose.ui.unit.IntOffset(srcLeft.toInt(), srcTop.toInt()),
+                        srcSize   = androidx.compose.ui.unit.IntSize(
+                            (srcRight - srcLeft).toInt().coerceAtLeast(1),
+                            (srcBottom - srcTop).toInt().coerceAtLeast(1)
+                        ),
+                        dstOffset = androidx.compose.ui.unit.IntOffset.Zero,
+                        dstSize   = androidx.compose.ui.unit.IntSize(size.width.toInt(), size.height.toInt()),
+                        alpha     = drawAlpha
+                    )
+                }
+            }
+            // Complementary alpha crossfade: fromBitmap fades out, toBitmap fades in.
+            // At alpha=0 (toBitmap not yet ready): fromBitmap at 1f, toBitmap skipped.
+            // At alpha=1 (transition complete):   fromBitmap at 0f, toBitmap at 1f.
+            drawSlice(fromBitmap, 1f - alpha)
+            if (toBitmap != null) drawSlice(toBitmap, alpha)
+            drawRect(tint)
             drawContent()
         }
 }
