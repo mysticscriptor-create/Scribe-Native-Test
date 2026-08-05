@@ -42,6 +42,7 @@ import com.primaloptima.scribe.ui.theme.LocalAccentColor
 import android.graphics.Bitmap
 import android.os.Build
 import com.primaloptima.scribe.ui.theme.LocalHazeState
+import com.primaloptima.scribe.ui.theme.localHasBgImage
 import com.primaloptima.scribe.ui.theme.LocalOneShotBitmap
 import com.primaloptima.scribe.ui.theme.LocalBarBlurBitmap
 import com.primaloptima.scribe.ui.theme.LocalSolidSurface
@@ -101,76 +102,64 @@ fun HomeScreen(
     var fabExpanded by remember { mutableStateOf(false) }
 
     // ── Left drawer one-shot blur (pre-API-31) ──────────────────────────────
-    // Bitmap is prepared BEFORE the drawer starts opening so the first visible
-    // frame already has the finished frosted look. No intermediate tint.
+    // gesturesEnabled = true so the native drag gesture opens the drawer.
+    // barBlurBitmap (always available) is the instant frosted placeholder.
+    // oneShotBitmap improves on it with a real screen capture, taken as soon
+    // as the drawer starts opening (targetValue → Open) and cleared when it
+    // fully closes (both values → Closed).
     val view = LocalView.current
     val blurRadiusPx = com.primaloptima.scribe.ui.theme.LocalFrostedBlurRadius.current.toInt().coerceIn(1, 25)
 
-    // hazeState is the single source of truth for "is blur active?".
-    // ScribeComposeTheme provides a non-null HazeState ONLY when the current
-    // theme has a background image AND frosted glass is enabled — exactly the
-    // condition under which one-shot blur is needed on pre-API-31 and Haze
-    // blurs on API 31+. Using localHasBgImage() here was unreliable: it reads
-    // a different composition local that can be false even when the background
-    // IS visually present, causing drawers to skip capture and show only a tint.
     val hazeState = LocalHazeState.current
-    val needsOneShotBlur = hazeState != null   // true iff bg image + frosted glass active
+    val needsOneShotBlur = Build.VERSION.SDK_INT < Build.VERSION_CODES.S && localHasBgImage()
 
     var oneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var isPreparingDrawer by remember { mutableStateOf(false) }
 
-    val openDrawerWithBlur: () -> Unit = {
-        if (drawerState.isClosed) {
-            scope.launch {
-                // Open the drawer immediately — barBlurBitmap in frostedPanel acts as
-                // the instant placeholder so the first frame is already frosted.
-                drawerState.open()
-                // On API < 31 + frosted glass: capture the real screen content in
-                // parallel and swap it in once ready. The user sees barBlurBitmap for
-                // the ~100–200 ms it takes, then oneShotBitmap replaces it silently.
-                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && needsOneShotBlur) {
-                    val raw = BitmapBlur.captureOnly(view)          // must stay on Main
-                    oneShotBitmap = withContext(Dispatchers.IO) {
-                        raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
-                    }
+    if (needsOneShotBlur) {
+        LaunchedEffect(drawerState.targetValue) {
+            if (drawerState.targetValue == DrawerValue.Open && !isPreparingDrawer) {
+                // Drawer is starting to open — capture and blur the screen.
+                // barBlurBitmap covers the first frames while this runs on IO.
+                isPreparingDrawer = true
+                val raw = BitmapBlur.captureOnly(view)
+                oneShotBitmap = withContext(Dispatchers.IO) {
+                    raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
                 }
-            }
-        }
-    }
-
-    // Clear the bitmap only when the drawer is fully closed again
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-        LaunchedEffect(drawerState.currentValue, drawerState.targetValue) {
-            if (drawerState.currentValue == DrawerValue.Closed &&
-                drawerState.targetValue == DrawerValue.Closed
-            ) {
+                isPreparingDrawer = false
+            } else if (drawerState.targetValue == DrawerValue.Closed) {
                 oneShotBitmap = null
             }
         }
     }
 
     // ── Right panel one-shot blur (pre-API-31) ──────────────────────────────
-    // Same instant-open pattern as the left drawer: show immediately using
-    // barBlurBitmap as the placeholder, then replace with the real capture.
+    // Capture on Main BEFORE the state flip triggers recomposition, blur on IO
+    // while the slide-in animation plays, then oneShotBitmap silently replaces
+    // barBlurBitmap. needsOneShotBlur already encodes the API-level check.
     var rightOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
     val openRightPanelWithBlur: () -> Unit = {
         if (!rightPanelVisible) {
+            // Capture NOW on Main before the state flip causes recomposition.
+            val raw = if (needsOneShotBlur) BitmapBlur.captureOnly(view) else null
+
+            // Show the panel — barBlurBitmap in frostedPanel is the instant placeholder.
             rightPanelVisible = true
-            // On API < 31 + frosted glass: capture async and swap in once ready.
-            // barBlurBitmap in frostedPanel covers the first frames instantly.
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && needsOneShotBlur) {
+
+            // Blur on IO and swap in once ready.
+            if (raw != null) {
                 scope.launch {
-                    val raw = BitmapBlur.captureOnly(view)
                     rightOneShotBitmap = withContext(Dispatchers.IO) {
-                        raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
+                        BitmapBlur.blurBitmap(raw, radius = blurRadiusPx)
                     }
                 }
             }
         }
     }
 
-    // Clear after the close animation finishes
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+    // Clear after the close animation finishes.
+    if (needsOneShotBlur) {
         LaunchedEffect(rightPanelVisible) {
             if (!rightPanelVisible) {
                 kotlinx.coroutines.delay(250)
@@ -286,7 +275,9 @@ fun HomeScreen(
         bookToChangeCover = null
     }
 
-    val swipeGestureModifier = Modifier.pointerInput(drawerState, rightPanelVisible) {
+    // Right-edge swipe → open stats panel. Left-drawer swipe is handled natively
+    // by ModalNavigationDrawer (gesturesEnabled = true).
+    val swipeGestureModifier = Modifier.pointerInput(rightPanelVisible) {
         var startX = 0f
         var totalX = 0f
         detectHorizontalDragGestures(
@@ -297,12 +288,6 @@ fun HomeScreen(
             onHorizontalDrag = { change, dragAmount ->
                 totalX += dragAmount
                 val threshold = 36.dp.toPx()
-                // Left-edge swipe → open navigation drawer (gated behind blur)
-                if (drawerState.isClosed && startX < size.width * 0.3f && totalX > threshold) {
-                    change.consume()
-                    openDrawerWithBlur()
-                }
-                // Right-edge swipe → open stats panel (gated behind blur)
                 if (!rightPanelVisible && startX > size.width * 0.72f && totalX < -threshold) {
                     change.consume()
                     openRightPanelWithBlur()
@@ -314,7 +299,7 @@ fun HomeScreen(
     CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap) {
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = false,  // custom swipeGestureModifier handles this via openDrawerWithBlur()
+        gesturesEnabled = true,
         drawerContent = {
             CompositionLocalProvider(LocalOneShotBitmap provides oneShotBitmap) {
             ModalDrawerSheet(
@@ -529,7 +514,7 @@ fun HomeScreen(
                         }
                     },
                     navigationIcon = {
-                        IconButton(onClick = { openDrawerWithBlur() }) {
+                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
                             val (iconColor, iconModifier) = rememberAdaptiveTextColor(
                                 fallback = MaterialTheme.colorScheme.primary
                             )
