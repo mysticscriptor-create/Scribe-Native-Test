@@ -114,51 +114,56 @@ fun HomeScreen(
     // a different composition local that can be false even when the background
     // IS visually present, causing drawers to skip capture and show only a tint.
     val hazeState = LocalHazeState.current
-    val needsOneShotBlur = Build.VERSION.SDK_INT < Build.VERSION_CODES.S && localHasBgImage()
+    val needsOneShotBlur = hazeState != null   // true iff bg image + frosted glass active
 
     var oneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var isPreparingDrawer by remember { mutableStateOf(false) }
 
-    // Dual-purpose capture+clear: watches targetValue to capture BEFORE animation starts
-    LaunchedEffect(drawerState.targetValue) {
-        if (needsOneShotBlur) {
-            if (drawerState.targetValue == DrawerValue.Open) {
-                if (!isPreparingDrawer && oneShotBitmap == null) {
-                    isPreparingDrawer = true
-                    val raw = BitmapBlur.captureOnly(view)
-                    val blurred = withContext(Dispatchers.IO) {
+    val openDrawerWithBlur: () -> Unit = {
+        if (drawerState.isClosed) {
+            scope.launch {
+                // Open the drawer immediately — barBlurBitmap in frostedPanel acts as
+                // the instant placeholder so the first frame is already frosted.
+                drawerState.open()
+                // On API < 31 + frosted glass: capture the real screen content in
+                // parallel and swap it in once ready. The user sees barBlurBitmap for
+                // the ~100–200 ms it takes, then oneShotBitmap replaces it silently.
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && needsOneShotBlur) {
+                    val raw = BitmapBlur.captureOnly(view)          // must stay on Main
+                    oneShotBitmap = withContext(Dispatchers.IO) {
                         raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
                     }
-                    oneShotBitmap = blurred
-                    isPreparingDrawer = false
                 }
-            } else {
+            }
+        }
+    }
+
+    // Clear the bitmap only when the drawer is fully closed again
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        LaunchedEffect(drawerState.currentValue, drawerState.targetValue) {
+            if (drawerState.currentValue == DrawerValue.Closed &&
+                drawerState.targetValue == DrawerValue.Closed
+            ) {
                 oneShotBitmap = null
             }
         }
     }
 
     // ── Right panel one-shot blur (pre-API-31) ──────────────────────────────
-    // Same gated pattern: capture + blur first, then show the panel.
+    // Same instant-open pattern as the left drawer: show immediately using
+    // barBlurBitmap as the placeholder, then replace with the real capture.
     var rightOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var isPreparingRight by remember { mutableStateOf(false) }
 
     val openRightPanelWithBlur: () -> Unit = {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S || !needsOneShotBlur) {
-            // No blur needed — show immediately (API 31+, plain theme, or no bg image)
+        if (!rightPanelVisible) {
             rightPanelVisible = true
-        } else {
-            // Pre-API-31 + frosted glass + bg image: capture first, then show
-            if (!isPreparingRight && !rightPanelVisible) {
-                isPreparingRight = true
+            // On API < 31 + frosted glass: capture async and swap in once ready.
+            // barBlurBitmap in frostedPanel covers the first frames instantly.
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && needsOneShotBlur) {
                 scope.launch {
                     val raw = BitmapBlur.captureOnly(view)
-                    val blurred = withContext(Dispatchers.IO) {
+                    rightOneShotBitmap = withContext(Dispatchers.IO) {
                         raw?.let { BitmapBlur.blurBitmap(it, radius = blurRadiusPx) }
                     }
-                    rightOneShotBitmap = blurred
-                    isPreparingRight = false
-                    rightPanelVisible = true                         // animation starts only now
                 }
             }
         }
@@ -292,6 +297,11 @@ fun HomeScreen(
             onHorizontalDrag = { change, dragAmount ->
                 totalX += dragAmount
                 val threshold = 36.dp.toPx()
+                // Left-edge swipe → open navigation drawer (gated behind blur)
+                if (drawerState.isClosed && startX < size.width * 0.3f && totalX > threshold) {
+                    change.consume()
+                    openDrawerWithBlur()
+                }
                 // Right-edge swipe → open stats panel (gated behind blur)
                 if (!rightPanelVisible && startX > size.width * 0.72f && totalX < -threshold) {
                     change.consume()
@@ -304,7 +314,7 @@ fun HomeScreen(
     CompositionLocalProvider(LocalOneShotBitmap provides dialogOneShotBitmap) {
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = true,
+        gesturesEnabled = false,  // custom swipeGestureModifier handles this via openDrawerWithBlur()
         drawerContent = {
             CompositionLocalProvider(LocalOneShotBitmap provides oneShotBitmap) {
             ModalDrawerSheet(
@@ -519,7 +529,7 @@ fun HomeScreen(
                         }
                     },
                     navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                        IconButton(onClick = { openDrawerWithBlur() }) {
                             val (iconColor, iconModifier) = rememberAdaptiveTextColor(
                                 fallback = MaterialTheme.colorScheme.primary
                             )

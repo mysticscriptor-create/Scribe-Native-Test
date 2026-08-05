@@ -288,6 +288,7 @@ fun Modifier.frostedFab(
 fun Modifier.frostedPanel(hazeState: HazeState?): Modifier {
     val solidSurface = LocalSolidSurface.current
     val oneShotBitmap = LocalOneShotBitmap.current
+    val barBlurBitmap = LocalBarBlurBitmap.current
     val hasBgImage = localHasBgImage()
     val tintEnabled = LocalFrostedTint.current
     val blurRadius = LocalFrostedBlurRadius.current
@@ -300,7 +301,14 @@ fun Modifier.frostedPanel(hazeState: HazeState?): Modifier {
             style = HazeStyle(blurRadius = blurRadius.dp, tint = HazeTint(tintColor), noiseFactor = 0f)
         )
     } else if (oneShotBitmap != null) {
+        // Real screen capture is ready — use it for pixel-perfect frosted look.
         this.drawWithOneShotBitmap(oneShotBitmap, tintColor)
+    } else if (barBlurBitmap != null) {
+        // oneShotBitmap not yet ready (capture still in flight) — use the
+        // pre-blurred wallpaper bitmap as an instant placeholder. This covers
+        // the first frames while the async capture completes, so the panel is
+        // never blank or solid-tinted on pre-API-31 devices.
+        this.drawWithOneShotBitmap(barBlurBitmap, tintColor)
     } else {
         this.background(solidSurface.copy(alpha = 0.95f))
     }
