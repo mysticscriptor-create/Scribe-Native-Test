@@ -49,12 +49,15 @@ object BitmapBlur {
         )
         val blurred = stackBlur(small, r)
         small.recycle()
-        val upscaled = Bitmap.createScaledBitmap(blurred, src.width, src.height, true)
-        blurred.recycle()
-        // Always apply the frosted glass finish (brightness lift + grain) so every
-        // caller gets the same glassy quality without each call site having to
-        // remember to chain it.
-        return applyFrostedGlassLook(upscaled)
+        // Apply frosted-glass finish on the small bitmap — brightness lift and grain
+        // are low-frequency effects, so the result is visually identical to doing it
+        // at full resolution but ~6× faster (40% scale = ~6× fewer pixels).
+        // The bilinear upscale that follows smears the grain very slightly, which
+        // actually enhances the glassy softness.
+        val frosted = applyFrostedGlassLook(blurred)
+        val upscaled = Bitmap.createScaledBitmap(frosted, src.width, src.height, true)
+        frosted.recycle()
+        return upscaled
     }
 
     /**
@@ -183,15 +186,17 @@ object BitmapBlur {
             val blurred = stackBlur(small, r)
             small.recycle()
 
-            // Upscale back with bilinear filtering — the upscale softens any
-            // pixelation and enhances the frosted look
-            val upscaled = Bitmap.createScaledBitmap(blurred, targetW, targetH, true)
-            blurred.recycle()
+            // Apply frosted-glass finish on the small bitmap before upscaling.
+            // At 25% scale this is ~16× fewer pixel operations than doing it at
+            // full resolution, with no perceptible quality difference — brightness
+            // lift and grain are both low-frequency. The bilinear upscale then
+            // softens the grain slightly, which only enhances the glassy look.
+            val frosted = applyFrostedGlassLook(blurred)
 
-            // FINAL step: apply frosted-glass look only after the entire one-shot
-            // pipeline has finished. Drawers / panels / dialogs therefore only ever
-            // see the completed glassy result.
-            applyFrostedGlassLook(upscaled)
+            // Upscale back with bilinear filtering
+            val upscaled = Bitmap.createScaledBitmap(frosted, targetW, targetH, true)
+            frosted.recycle()
+            upscaled
         } catch (_: Exception) {
             null
         }
