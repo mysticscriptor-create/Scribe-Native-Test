@@ -143,8 +143,22 @@ fun DashboardTabContent(
         // ── Quick Actions ─────────────────────────────────────────────────────
         item {
             Spacer(modifier = Modifier.height(20.dp))
-            DashboardSectionLabel("Quick Actions")
-            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                DashboardSectionLabel("Quick Actions", inline = true)
+                TextButton(
+                    onClick = onGoToBooks,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                ) {
+                    Text("See All", fontSize = 12.sp, color = accentColor)
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
             QuickActionsRow(
                 ongoingBook = ongoingBook,
                 chapters = chapters,
@@ -449,14 +463,15 @@ private fun CurrentProjectCard(
                         }
                     }
 
-                    // Title + stats — constrained to cover height
+                    // Title + stats — height matches cover image; weight(1f) fills
+                    // remaining Row width. Do NOT combine weight + height on same modifier.
                     Column(
                         modifier = Modifier
                             .weight(1f)
-                            .height(136.dp),          // match cover height exactly
+                            .heightIn(max = 136.dp),   // cap at cover height, never exceed
                         verticalArrangement = Arrangement.SpaceBetween
                     ) {
-                        // Top block: label + title + word count + progress bar
+                        // ── Top block ─────────────────────────────────────────
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(
                                 "CURRENT PROJECT",
@@ -474,19 +489,19 @@ private fun CurrentProjectCard(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
 
-                            // Word count
+                            // Word count — comma-separated full numbers
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Text(
-                                    text = formatWordCount(totalWords),
+                                    text = formatWordCountFull(totalWords),
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "/ ${formatWordCount(targetGoal)} words",
+                                    text = "/ ${formatWordCountFull(targetGoal)} words",
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                                 )
@@ -525,8 +540,12 @@ private fun CurrentProjectCard(
                             }
                         }
 
-                        // Bottom block: "Last edited" label + chapter row
+                        // ── Bottom block: Last edited ─────────────────────────
+                        // Always renders when there's a chapter; guards empty name
                         if (lastChapter != null) {
+                            val chapterDisplayName = lastChapter.name
+                                .trim()
+                                .ifEmpty { "Untitled chapter" }
                             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(
                                     text = "Last edited",
@@ -534,7 +553,6 @@ private fun CurrentProjectCard(
                                     letterSpacing = 0.3.sp,
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                                 )
-                                // Icon + chapter name on the same row
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(5.dp)
@@ -543,10 +561,10 @@ private fun CurrentProjectCard(
                                         Icons.Default.Article,
                                         contentDescription = null,
                                         modifier = Modifier.size(12.dp),
-                                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+                                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                                     )
                                     Text(
-                                        text = lastChapter.name,
+                                        text = chapterDisplayName,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Medium,
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
@@ -554,7 +572,6 @@ private fun CurrentProjectCard(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
-                                // Timestamp below
                                 Text(
                                     text = lastTimestamp ?: "",
                                     fontSize = 10.sp,
@@ -1008,7 +1025,6 @@ private fun RecentChapterRowInline(
         note.content.split("\\s+".toRegex()).count { it.isNotBlank() }
     }
     val outlineColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
-    val cardBg = MaterialTheme.colorScheme.surface.copy(alpha = 0f) // transparent — same as card
 
     Row(
         modifier = Modifier
@@ -1341,7 +1357,8 @@ private fun MiniWeekBar(
 private fun MiniWeekBarWithLabels(
     weekData: List<Pair<String, Int>>,
     accentColor: Color,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    barHeight: androidx.compose.ui.unit.Dp = 44.dp
 ) {
     val maxVal = remember(weekData) {
         (weekData.maxOfOrNull { it.second } ?: 1).coerceAtLeast(1)
@@ -1358,11 +1375,11 @@ private fun MiniWeekBarWithLabels(
     }
 
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        // Bars
+        // Bars — fixed height so weight() isn't needed inside a Column
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f)
+                .height(barHeight)
         ) {
             val barCount = weekData.size
             val spacingPx = size.width * 0.04f
@@ -1435,6 +1452,10 @@ private fun formatWordCount(count: Int): String {
         else           -> "$count"
     }
 }
+
+/** Full number with comma separators — used where space allows, e.g. project card header. */
+private fun formatWordCountFull(count: Int): String =
+    java.text.NumberFormat.getNumberInstance(Locale.US).format(count)
 
 private fun formatRelativeTime(timestamp: Long): String {
     val now = System.currentTimeMillis()
