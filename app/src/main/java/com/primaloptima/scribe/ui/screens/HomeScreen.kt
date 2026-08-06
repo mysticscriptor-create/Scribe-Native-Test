@@ -832,6 +832,12 @@ fun HomeScreen(
                                         containerColor = frostedContainerColor(fallback = accentClr),
                                         contentColor = Color.White,
                                         shape = RoundedCornerShape(16.dp),
+                                        elevation = FloatingActionButtonDefaults.elevation(
+                                            defaultElevation = 0.dp,
+                                            pressedElevation = 0.dp,
+                                            focusedElevation = 0.dp,
+                                            hoveredElevation = 0.dp
+                                        ),
                                         modifier = Modifier.frostedFab(LocalHazeState.current, shape = RoundedCornerShape(16.dp))
                                     ) {
                                         Icon(Icons.Default.Add, contentDescription = "New Book")
@@ -854,6 +860,12 @@ fun HomeScreen(
                             containerColor = frostedContainerColor(fallback = accentClr),
                             contentColor = Color.White,
                             shape = RoundedCornerShape(16.dp),
+                            elevation = FloatingActionButtonDefaults.elevation(
+                                defaultElevation = 0.dp,
+                                pressedElevation = 0.dp,
+                                focusedElevation = 0.dp,
+                                hoveredElevation = 0.dp
+                            ),
                             modifier = Modifier.frostedFab(LocalHazeState.current, shape = RoundedCornerShape(16.dp))
                         )
                         else -> Box(Modifier)

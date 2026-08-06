@@ -40,7 +40,7 @@ object BitmapBlur {
     @WorkerThread
     fun blurBitmap(src: Bitmap, radius: Int): Bitmap {
         val r = radius.coerceIn(1, 25)
-        val scale = 0.4f
+        val scale = 0.25f
         val small = Bitmap.createScaledBitmap(
             src,
             (src.width * scale).toInt().coerceAtLeast(1),
@@ -51,7 +51,7 @@ object BitmapBlur {
         small.recycle()
         // Apply frosted-glass finish on the small bitmap — brightness lift and grain
         // are low-frequency effects, so the result is visually identical to doing it
-        // at full resolution but ~6× faster (40% scale = ~6× fewer pixels).
+        // at full resolution but ~16× faster (25% scale = ~16× fewer pixels).
         // The bilinear upscale that follows smears the grain very slightly, which
         // actually enhances the glassy softness.
         val frosted = applyFrostedGlassLook(blurred)
