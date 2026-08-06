@@ -1,11 +1,11 @@
 package com.primaloptima.scribe.ui.screens
 
-import android.content.Intent
 import android.os.Build
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -14,25 +14,27 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.allowHardware
-import com.primaloptima.scribe.MainActivity
+import com.airbnb.lottie.compose.*
 import com.primaloptima.scribe.ScribeApp
 import com.primaloptima.scribe.data.Book
 import com.primaloptima.scribe.data.Note
@@ -58,7 +60,7 @@ fun DashboardTabContent(
     val prefs = remember { (context.applicationContext as ScribeApp).prefs }
 
     val ongoingBookId by vm.ongoingProjectBookId.collectAsState()
-    val chapters by vm.ongoingProjectChapters.collectAsState()
+    val chapters      by vm.ongoingProjectChapters.collectAsState()
     val projectAllNotes by vm.ongoingProjectAllNotes.collectAsState()
     val currentStreak by vm.currentStreak.collectAsState()
 
@@ -66,132 +68,125 @@ fun DashboardTabContent(
         ongoingBookId?.let { id -> allBooks.firstOrNull { it.id == id } }
     }
 
-    // Stats derived from real data
+    // Total word count across all notes in the ongoing project
     val totalProjectWords = remember(projectAllNotes) {
         projectAllNotes.sumOf { it.content.split("\\s+".toRegex()).count { w -> w.isNotBlank() } }
     }
+
     val dailyGoal = prefs.dailyGoal
-    val todayStr = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) }
+    val todayStr  = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) }
     val todayWords = remember(todayStr) { prefs.getTodayWords(todayStr) }
 
-    // 7-day history for the week bar chart
+    // 7-day history for the week bar chart (oldest → newest)
     val weekData = remember {
-        val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        val fmt    = SimpleDateFormat("yyyy-MM-dd", Locale.US)
         val dayFmt = SimpleDateFormat("EEE", Locale.US)
         (6 downTo 0).map { daysAgo ->
-            val cal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -daysAgo) }
+            val cal     = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -daysAgo) }
             val dateStr = fmt.format(cal.time)
-            val label = dayFmt.format(cal.time).take(1) // M, T, W…
+            val label   = dayFmt.format(cal.time).take(1)
             Pair(label, prefs.getTodayWords(dateStr))
         }
     }
 
-    // Book picker bottom sheet state
     var showBookPicker by remember { mutableStateOf(false) }
 
-    val hazeState = LocalHazeState.current
+    val hazeState   = LocalHazeState.current
     val accentColor = LocalAccentColor.current
 
-    // Supply LocalBarBlurBitmap as the one-shot source for all frosted cards on
-    // pre-API-31 devices. Cards are always visible (no screen-capture needed), so
-    // the static pre-blurred wallpaper bitmap is the correct placeholder.
     CompositionLocalProvider(LocalOneShotBitmap provides LocalBarBlurBitmap.current) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 24.dp)
-    ) {
-        // ── Greeting header ───────────────────────────────────────────────────
-        item {
-            DashboardGreeting(
-                streak = currentStreak,
-                accentColor = accentColor
-            )
-        }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 24.dp)
+        ) {
 
-        // ── Current Project card ──────────────────────────────────────────────
-        item {
-            Spacer(modifier = Modifier.height(8.dp))
-            if (ongoingBook == null) {
-                NoProjectCard(
-                    accentColor = accentColor,
-                    hazeState = hazeState,
-                    onSetProject = { showBookPicker = true }
-                )
-            } else {
-                CurrentProjectCard(
-                    book = ongoingBook,
-                    chapters = chapters,
-                    totalWords = totalProjectWords,
-                    accentColor = accentColor,
-                    hazeState = hazeState,
-                    onContinueWriting = {
-                        val latest = chapters.firstOrNull()
-                        if (latest != null) onOpenNote(latest.id, latest.bookId)
-                    },
-                    onNewChapter = {
-                        vm.createChapter { note ->
-                            onOpenNote(note.id, note.bookId)
-                        }
-                    },
-                    onOpenBook = { onOpenBook(ongoingBook) }
-                )
+            // ── Greeting ──────────────────────────────────────────────────────
+            item {
+                DashboardGreeting(streak = currentStreak, accentColor = accentColor)
             }
-        }
 
-        // ── Quick Actions ─────────────────────────────────────────────────────
-        item {
-            Spacer(modifier = Modifier.height(20.dp))
-            DashboardSectionLabel("Quick Actions")
-            Spacer(modifier = Modifier.height(10.dp))
-            QuickActionsRow(
-                ongoingBook = ongoingBook,
-                chapters = chapters,
-                accentColor = accentColor,
-                hazeState = hazeState,
-                onOpenNote = onOpenNote,
-                onOpenBook = { ongoingBook?.let { onOpenBook(it) } },
-                onGoToStats = onGoToStats,
-                onOpenSheets = onOpenSheets,
-                onGoToBooks = onGoToBooks
-            )
-        }
+            // ── Current Project card (or empty state) ─────────────────────────
+            item {
+                Spacer(modifier = Modifier.height(10.dp))
+                if (ongoingBook == null) {
+                    NoProjectCard(
+                        accentColor  = accentColor,
+                        hazeState    = hazeState,
+                        onSetProject = { showBookPicker = true }
+                    )
+                } else {
+                    CurrentProjectCard(
+                        book             = ongoingBook,
+                        chapters         = chapters,
+                        totalWords       = totalProjectWords,
+                        accentColor      = accentColor,
+                        hazeState        = hazeState,
+                        onContinueWriting = {
+                            val latest = chapters.firstOrNull()
+                            if (latest != null) onOpenNote(latest.id, latest.bookId)
+                        },
+                        onNewChapter = {
+                            vm.createChapter { note -> onOpenNote(note.id, note.bookId) }
+                        },
+                        onOpenBook = { onOpenBook(ongoingBook) }
+                    )
+                }
+            }
 
-        // ── Progress cards ────────────────────────────────────────────────────
-        item {
-            Spacer(modifier = Modifier.height(20.dp))
-            ProgressCardsRow(
-                todayWords = todayWords,
-                dailyGoal = dailyGoal,
-                weekData = weekData,
-                accentColor = accentColor,
-                hazeState = hazeState
-            )
-        }
-
-        // ── Recent Chapters ───────────────────────────────────────────────────
-        if (ongoingBook != null && chapters.isNotEmpty()) {
+            // ── Quick Actions ─────────────────────────────────────────────────
             item {
                 Spacer(modifier = Modifier.height(20.dp))
-                RecentChaptersCard(
-                    chapters = chapters.take(3),
-                    accentColor = accentColor,
-                    hazeState = hazeState,
-                    onSeeAll = { ongoingBook?.let { onOpenBook(it) } },
-                    onOpenNote = onOpenNote
+                QuickActionsRow(
+                    ongoingBook  = ongoingBook,
+                    chapters     = chapters,
+                    accentColor  = accentColor,
+                    hazeState    = hazeState,
+                    onOpenNote   = onOpenNote,
+                    onOpenBook   = { ongoingBook?.let { onOpenBook(it) } },
+                    onGoToStats  = onGoToStats,
+                    onOpenSheets = onOpenSheets,
+                    onGoToBooks  = onGoToBooks
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // ── Writing Progress (unified card) ───────────────────────────────
+            item {
+                Spacer(modifier = Modifier.height(20.dp))
+                WritingProgressCard(
+                    todayWords   = todayWords,
+                    dailyGoal    = dailyGoal,
+                    weekData     = weekData,
+                    streak       = currentStreak,
+                    totalWords   = totalProjectWords,
+                    accentColor  = accentColor,
+                    hazeState    = hazeState,
+                    onGoToStats  = onGoToStats
+                )
+            }
+
+            // ── Recent Chapters ───────────────────────────────────────────────
+            if (ongoingBook != null && chapters.isNotEmpty()) {
+                item {
+                    Spacer(modifier = Modifier.height(20.dp))
+                    RecentChaptersCard(
+                        chapters    = chapters.take(3),
+                        accentColor = accentColor,
+                        hazeState   = hazeState,
+                        onSeeAll    = { ongoingBook?.let { onOpenBook(it) } },
+                        onOpenNote  = onOpenNote
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
             }
         }
     }
 
-    } // end CompositionLocalProvider(LocalOneShotBitmap)
-
     // ── Book picker bottom sheet ──────────────────────────────────────────────
     if (showBookPicker) {
         BookPickerSheet(
-            books = allBooks,
+            books            = allBooks,
             currentOngoingId = ongoingBookId,
-            accentColor = accentColor,
+            accentColor      = accentColor,
             onSelect = { book ->
                 vm.setOngoingProject(book.id)
                 showBookPicker = false
@@ -201,18 +196,21 @@ fun DashboardTabContent(
     }
 }
 
-// ── Greeting ──────────────────────────────────────────────────────────────────
+// ── Section 1: Greeting ───────────────────────────────────────────────────────
 
 @Composable
-private fun DashboardGreeting(
-    streak: Int,
-    accentColor: Color
-) {
+private fun DashboardGreeting(streak: Int, accentColor: Color) {
     val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
     val greeting = when {
         hour < 12 -> "Good morning"
         hour < 17 -> "Good afternoon"
         else      -> "Good evening"
+    }
+    // Rotating subtitles by time of day
+    val subtitle = when {
+        hour < 12 -> "The blank page is waiting for you."
+        hour < 17 -> "Every word shapes your story."
+        else      -> "Great stories begin with one more sentence."
     }
 
     val (textColor, textMod) = rememberAdaptiveTextColor(
@@ -222,52 +220,62 @@ private fun DashboardGreeting(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 4.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
+        // Left: greeting text
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = greeting,
-                    fontSize = 22.sp,
+                    text       = greeting,
+                    fontSize   = 22.sp,
                     fontWeight = FontWeight.Bold,
-                    color = textColor,
-                    modifier = textMod
+                    color      = textColor,
+                    modifier   = textMod
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Icon(
                     Icons.Default.AutoAwesome,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp),
-                    tint = accentColor
+                    tint     = accentColor
                 )
             }
             Text(
-                text = "Let's bring your stories to life.",
+                text     = subtitle,
                 fontSize = 13.sp,
-                color = textColor.copy(alpha = 0.6f),
+                color    = textColor.copy(alpha = 0.6f),
                 modifier = textMod
             )
         }
 
+        // Right: streak pill (two lines — number + label)
         if (streak > 0) {
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(50))
                     .background(accentColor.copy(alpha = 0.15f))
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text("🔥", fontSize = 14.sp)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text("🔥", fontSize = 14.sp)
+                        Text(
+                            text       = "$streak ${if (streak == 1) "Day" else "Days"}",
+                            fontSize   = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color      = accentColor
+                        )
+                    }
                     Text(
-                        text = "$streak ${if (streak == 1) "Day" else "Days"}",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = accentColor
+                        text     = "Writing Streak",
+                        fontSize = 10.sp,
+                        color    = accentColor.copy(alpha = 0.65f),
+                        fontWeight = FontWeight.Medium
                     )
                 }
             }
@@ -275,7 +283,7 @@ private fun DashboardGreeting(
     }
 }
 
-// ── No project empty state ────────────────────────────────────────────────────
+// ── Section 2a: No Project empty state ───────────────────────────────────────
 
 @Composable
 private fun NoProjectCard(
@@ -283,16 +291,21 @@ private fun NoProjectCard(
     hazeState: dev.chrisbanes.haze.HazeState?,
     onSetProject: () -> Unit
 ) {
-    val hasBgImage = localHasBgImage()
+    val hasBgImage   = localHasBgImage()
     val solidSurface = LocalSolidSurface.current
-    val cardShape = RoundedCornerShape(20.dp)
+    val cardShape    = RoundedCornerShape(20.dp)
+
+    // Lottie animation from assets/shelf_empty.json
+    val composition by rememberLottieComposition(
+        LottieCompositionSpec.Asset("shelf_empty.json")
+    )
 
     ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
             .frostedCard(hazeState, shape = cardShape),
-        shape = cardShape,
+        shape  = cardShape,
         colors = CardDefaults.elevatedCardColors(
             containerColor = frostedContainerColor(
                 fallback = if (hasBgImage) solidSurface.copy(alpha = 0.85f)
@@ -305,40 +318,32 @@ private fun NoProjectCard(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(24.dp),
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(56.dp)
-                        .clip(CircleShape)
-                        .background(accentColor.copy(alpha = 0.12f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Outlined.Book,
-                        contentDescription = null,
-                        modifier = Modifier.size(28.dp),
-                        tint = accentColor
-                    )
-                }
+                // Lottie animation instead of static icon
+                LottieAnimation(
+                    composition = composition,
+                    iterations  = LottieConstants.IterateForever,
+                    modifier    = Modifier.size(80.dp)
+                )
                 Text(
                     "No ongoing project",
                     fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    color = MaterialTheme.colorScheme.onSurface
+                    fontSize   = 16.sp,
+                    color      = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
                     "Set a book as your ongoing project to track chapters, word count, and daily progress here.",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    fontSize  = 13.sp,
+                    color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    textAlign = TextAlign.Center
                 )
                 Button(
                     onClick = onSetProject,
-                    colors = ButtonDefaults.buttonColors(containerColor = accentColor),
-                    shape = RoundedCornerShape(12.dp)
+                    colors  = ButtonDefaults.buttonColors(containerColor = accentColor),
+                    shape   = RoundedCornerShape(12.dp)
                 ) {
                     Icon(
                         Icons.Default.Bookmark,
@@ -346,14 +351,14 @@ private fun NoProjectCard(
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Set Ongoing Project")
+                    Text("Set Ongoing Project", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
     }
 }
 
-// ── Current Project card ──────────────────────────────────────────────────────
+// ── Section 2b: Current Project card ─────────────────────────────────────────
 
 @Composable
 private fun CurrentProjectCard(
@@ -366,25 +371,22 @@ private fun CurrentProjectCard(
     onNewChapter: () -> Unit,
     onOpenBook: () -> Unit
 ) {
-    val hasBgImage = localHasBgImage()
+    val hasBgImage   = localHasBgImage()
     val solidSurface = LocalSolidSurface.current
-    val cardShape = RoundedCornerShape(20.dp)
-    val context = LocalContext.current
+    val cardShape    = RoundedCornerShape(20.dp)
+    val context      = LocalContext.current
 
-    val lastChapter = chapters.firstOrNull()
-    val lastEditedText = lastChapter?.let {
-        val wc = it.content.split("\\s+".toRegex()).count { w -> w.isNotBlank() }
-        "${it.name}  •  $wc words"
-    }
+    val lastChapter   = chapters.firstOrNull()
     val lastTimestamp = lastChapter?.let { formatRelativeTime(it.updatedAt) }
+    val chapterCount  = chapters.size
 
-    // Animated progress bar
-    val targetGoal = 120_000 // classic novel length as a sensible milestone
+    // Novel progress toward 120k-word milestone
+    val targetGoal       = 120_000
     val progressFraction = (totalWords.toFloat() / targetGoal).coerceIn(0f, 1f)
     val animatedProgress by animateFloatAsState(
-        targetValue = progressFraction,
-        animationSpec = tween(600, easing = FastOutSlowInEasing),
-        label = "project-progress"
+        targetValue    = progressFraction,
+        animationSpec  = tween(600, easing = FastOutSlowInEasing),
+        label          = "project-progress"
     )
 
     ElevatedCard(
@@ -392,7 +394,7 @@ private fun CurrentProjectCard(
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
             .frostedCard(hazeState, shape = cardShape),
-        shape = cardShape,
+        shape  = cardShape,
         colors = CardDefaults.elevatedCardColors(
             containerColor = frostedContainerColor(
                 fallback = if (hasBgImage) solidSurface.copy(alpha = 0.85f)
@@ -404,17 +406,15 @@ private fun CurrentProjectCard(
         FrostedCardContent {
             Column(modifier = Modifier.fillMaxWidth()) {
 
-                // ── Cover + meta ──────────────────────────────────────────────
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    // Cover thumbnail — tall hero matching image 2 proportions
+                // ── Cover + meta row ──────────────────────────────────────────
+                Row(modifier = Modifier.fillMaxWidth()) {
+
+                    // Cover: flush to card left edge, clips to card corners on left side
                     Box(
                         modifier = Modifier
-                            .size(width = 96.dp, height = 136.dp)
-                            .shadow(8.dp, RoundedCornerShape(10.dp))
-                            .clip(RoundedCornerShape(10.dp))
+                            .width(108.dp)
+                            .height(152.dp)
+                            .clip(RoundedCornerShape(topStart = 20.dp, bottomStart = 20.dp))
                             .clickable { onOpenBook() }
                     ) {
                         if (book.coverUri != null) {
@@ -428,133 +428,140 @@ private fun CurrentProjectCard(
                                     book.coverUri
                                 },
                                 contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
+                                contentScale       = ContentScale.Crop,
+                                modifier           = Modifier.fillMaxSize()
                             )
                         } else {
+                            // Placeholder when no cover image
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .background(accentColor.copy(alpha = 0.15f)),
+                                    .background(accentColor.copy(alpha = 0.12f)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     Icons.Outlined.Book,
                                     contentDescription = null,
-                                    modifier = Modifier.size(32.dp),
-                                    tint = accentColor
+                                    modifier = Modifier.size(34.dp),
+                                    tint     = accentColor
                                 )
                             }
                         }
                     }
 
-                    // Title + stats — constrained to cover height so card doesn't overflow
+                    // Right column: all metadata
                     Column(
                         modifier = Modifier
                             .weight(1f)
-                            .height(136.dp),  // matches cover height exactly
+                            .height(152.dp)
+                            .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 12.dp),
                         verticalArrangement = Arrangement.SpaceBetween
                     ) {
-                        // Top block: label + title + word count + bar
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        // Top block
+                        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            // "CURRENT PROJECT" overline
                             Text(
-                                "CURRENT PROJECT",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                text          = "CURRENT PROJECT",
+                                fontSize      = 10.sp,
+                                fontWeight    = FontWeight.SemiBold,
                                 letterSpacing = 1.5.sp,
-                                color = accentColor
+                                color         = accentColor
                             )
+                            // Book title
                             Text(
-                                text = book.title,
+                                text       = book.title,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                color = MaterialTheme.colorScheme.onSurface
+                                fontSize   = 17.sp,
+                                maxLines   = 2,
+                                overflow   = TextOverflow.Ellipsis,
+                                color      = MaterialTheme.colorScheme.onSurface
                             )
+                            // Metadata row: chapters · words
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                verticalAlignment      = Alignment.CenterVertically,
+                                horizontalArrangement  = Arrangement.spacedBy(6.dp)
                             ) {
-                                Text(
-                                    text = formatWordCount(totalWords),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                Icon(
+                                    Icons.Default.MenuBook,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(12.dp),
+                                    tint     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                                 )
                                 Text(
-                                    text = "/ ${formatWordCount(targetGoal)} words",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                    text     = "$chapterCount ${if (chapterCount == 1) "Chapter" else "Chapters"}",
+                                    fontSize = 11.sp,
+                                    color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                )
+                                Text(
+                                    text     = "·",
+                                    fontSize = 11.sp,
+                                    color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+                                )
+                                Icon(
+                                    Icons.Default.Edit,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(12.dp),
+                                    tint     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                )
+                                Text(
+                                    text     = "${formatWordCount(totalWords)} / ${formatWordCount(targetGoal)} words",
+                                    fontSize = 11.sp,
+                                    color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
-                            // Progress bar + inline %
-                            val barTrack = MaterialTheme.colorScheme.outlineVariant
+                            // Progress bar + percent
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
+                                verticalAlignment     = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Canvas(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(5.dp)
-                                ) {
-                                    val radius = size.height / 2f
-                                    drawRoundRect(
-                                        color = barTrack,
-                                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius)
-                                    )
-                                    if (animatedProgress > 0f) {
-                                        drawRoundRect(
-                                            color = accentColor,
-                                            size = Size(size.width * animatedProgress, size.height),
-                                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius)
-                                        )
-                                    }
-                                }
+                                ThinProgressBar(
+                                    progress    = animatedProgress,
+                                    accentColor = accentColor,
+                                    modifier    = Modifier.weight(1f).height(5.dp)
+                                )
                                 Text(
-                                    text = "${(progressFraction * 100).toInt()}%",
-                                    fontSize = 10.sp,
+                                    text       = "${(progressFraction * 100).toInt()}%",
+                                    fontSize   = 10.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = accentColor
+                                    color      = accentColor
                                 )
                             }
                         }
 
-                        // Bottom block: last edited — matches image 2 exactly
+                        // Bottom block: last edited info
                         if (lastChapter != null) {
                             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(
-                                    text = "Last edited",
-                                    fontSize = 9.sp,
+                                    text       = "Last edited",
+                                    fontSize   = 9.sp,
                                     fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                                    color      = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                                 )
-                                // Icon + chapter name on the same line
                                 Row(
-                                    verticalAlignment = Alignment.CenterVertically,
+                                    verticalAlignment     = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(5.dp)
                                 ) {
                                     Icon(
                                         Icons.Default.Article,
                                         contentDescription = null,
-                                        modifier = Modifier.size(12.dp),
-                                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                                        modifier = Modifier.size(11.dp),
+                                        tint     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                                     )
                                     Text(
-                                        text = lastChapter.name,
+                                        text     = lastChapter.name,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                                        color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
-                                // Timestamp below
                                 Text(
-                                    text = lastTimestamp ?: "",
+                                    text     = lastTimestamp ?: "",
                                     fontSize = 10.sp,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                                    color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                                 )
                             }
                         }
@@ -563,7 +570,7 @@ private fun CurrentProjectCard(
 
                 // ── Action buttons ────────────────────────────────────────────
                 HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f)
                 )
                 Row(
                     modifier = Modifier
@@ -571,13 +578,14 @@ private fun CurrentProjectCard(
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Continue Writing — primary CTA
                     Button(
-                        onClick = onContinueWriting,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = accentColor),
-                        shape = RoundedCornerShape(12.dp),
-                        enabled = chapters.isNotEmpty()
+                        onClick  = onContinueWriting,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp),
+                        colors   = ButtonDefaults.buttonColors(containerColor = accentColor),
+                        shape    = RoundedCornerShape(12.dp),
+                        enabled  = chapters.isNotEmpty()
                     ) {
                         Icon(
                             Icons.Default.Edit,
@@ -586,25 +594,26 @@ private fun CurrentProjectCard(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            if (chapters.isEmpty()) "No chapters yet" else "Continue Writing",
-                            fontSize = 13.sp,
-                            maxLines = 1
+                            text       = if (chapters.isEmpty()) "No chapters yet" else "Continue Writing",
+                            fontSize   = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines   = 1
                         )
                     }
-                    // New chapter — secondary
                     OutlinedButton(
-                        onClick = onNewChapter,
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.5f))
+                        onClick  = onNewChapter,
+                        modifier = Modifier.height(44.dp),
+                        shape    = RoundedCornerShape(12.dp),
+                        border   = BorderStroke(1.dp, accentColor.copy(alpha = 0.5f))
                     ) {
                         Icon(
                             Icons.Default.Add,
                             contentDescription = "New Chapter",
                             modifier = Modifier.size(16.dp),
-                            tint = accentColor
+                            tint     = accentColor
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("New", fontSize = 13.sp, color = accentColor)
+                        Text("New", fontSize = 14.sp, color = accentColor, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
@@ -612,7 +621,7 @@ private fun CurrentProjectCard(
     }
 }
 
-// ── Quick Actions ─────────────────────────────────────────────────────────────
+// ── Section 3: Quick Actions row ──────────────────────────────────────────────
 
 @Composable
 private fun QuickActionsRow(
@@ -627,92 +636,117 @@ private fun QuickActionsRow(
     onGoToBooks: () -> Unit
 ) {
     val actions = listOf(
-        Triple(Icons.Default.Edit,       "Write",      {
+        Triple(Icons.Default.Edit,               "Write",      {
             val latest = chapters.firstOrNull()
-            if (latest != null) onOpenNote(latest.id, latest.bookId)
-            else onGoToBooks()
+            if (latest != null) onOpenNote(latest.id, latest.bookId) else onGoToBooks()
         }),
-        Triple(Icons.Default.FormatListBulleted, "Outline", { onOpenBook() }),
-        Triple(Icons.Default.People,     "Characters", { onOpenBook() }),
-        Triple(Icons.Default.Public,     "World",      { onOpenSheets() }),
-        Triple(Icons.Default.BarChart,   "Stats",      { onGoToStats() })
+        Triple(Icons.Default.FormatListBulleted, "Outline",    { onOpenBook() }),
+        Triple(Icons.Default.People,             "Characters", { onOpenBook() }),
+        Triple(Icons.Default.Public,             "World",      { onOpenSheets() }),
+        Triple(Icons.Default.BarChart,           "Stats",      { onGoToStats() })
     )
 
-    val hasBgImage = localHasBgImage()
+    val hasBgImage   = localHasBgImage()
     val solidSurface = LocalSolidSurface.current
-    val cardShape = RoundedCornerShape(16.dp)
+    val cardShape    = RoundedCornerShape(16.dp)
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        actions.forEachIndexed { index, (icon, label, action) ->
-            val isWrite = index == 0  // "Write" is always the first action — primary CTA
-            ElevatedCard(
-                modifier = Modifier
-                    .weight(1f)
-                    .aspectRatio(0.85f)
-                    .then(
-                        // Write button: accent background (no frosted, always solid)
-                        // Others: frosted card modifier as normal
-                        if (isWrite) Modifier else Modifier.frostedCard(hazeState, shape = cardShape)
-                    )
-                    .clickable { action() },
-                shape = cardShape,
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = if (isWrite) accentColor
-                    else frostedContainerColor(
-                        fallback = if (hasBgImage) solidSurface.copy(alpha = 0.82f)
-                                   else MaterialTheme.colorScheme.surface
-                    )
-                ),
-                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
-            ) {
-                // Write button uses plain content (no frosted wrapper — it's a solid accent card)
-                if (isWrite) {
-                    Column(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = label,
-                            modifier = Modifier.size(22.dp),
-                            tint = Color.White
+    val (labelColor, _) = rememberAdaptiveTextColor(
+        fallback = MaterialTheme.colorScheme.onSurface
+    )
+
+    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+        // Section header with "See All" link
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            Text(
+                text          = "Quick Actions",
+                fontSize      = 13.sp,
+                fontWeight    = FontWeight.SemiBold,
+                letterSpacing = 0.5.sp,
+                color         = labelColor.copy(alpha = 0.6f)
+            )
+            Text(
+                text       = "See All",
+                fontSize   = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color      = accentColor,
+                modifier   = Modifier.clickable { onGoToBooks() }
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Tiles row
+        Row(
+            modifier              = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            actions.forEachIndexed { index, (icon, label, action) ->
+                val isWrite = index == 0
+                ElevatedCard(
+                    modifier = Modifier
+                        .weight(1f)
+                        .aspectRatio(0.85f)
+                        .then(
+                            if (isWrite) Modifier
+                            else Modifier.frostedCard(hazeState, shape = cardShape)
                         )
-                        Spacer(modifier = Modifier.height(5.dp))
-                        Text(
-                            text = label,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White,
-                            maxLines = 1
+                        .clickable { action() },
+                    shape  = cardShape,
+                    colors = CardDefaults.elevatedCardColors(
+                        containerColor = if (isWrite) accentColor
+                        else frostedContainerColor(
+                            fallback = if (hasBgImage) solidSurface.copy(alpha = 0.82f)
+                                       else MaterialTheme.colorScheme.surface
                         )
-                    }
-                } else {
-                    FrostedCardContent {
+                    ),
+                    elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
+                ) {
+                    if (isWrite) {
                         Column(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
+                            modifier              = Modifier.fillMaxSize(),
+                            horizontalAlignment   = Alignment.CenterHorizontally,
+                            verticalArrangement   = Arrangement.Center
                         ) {
                             Icon(
-                                imageVector = icon,
+                                imageVector        = icon,
                                 contentDescription = label,
-                                modifier = Modifier.size(20.dp),
-                                tint = accentColor
+                                modifier           = Modifier.size(24.dp),
+                                tint               = Color.White
                             )
                             Spacer(modifier = Modifier.height(5.dp))
                             Text(
-                                text = label,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
-                                maxLines = 1
+                                text       = label,
+                                fontSize   = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color      = Color.White,
+                                maxLines   = 1
                             )
+                        }
+                    } else {
+                        FrostedCardContent {
+                            Column(
+                                modifier              = Modifier.fillMaxSize(),
+                                horizontalAlignment   = Alignment.CenterHorizontally,
+                                verticalArrangement   = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector        = icon,
+                                    contentDescription = label,
+                                    modifier           = Modifier.size(24.dp),
+                                    tint               = accentColor
+                                )
+                                Spacer(modifier = Modifier.height(5.dp))
+                                Text(
+                                    text       = label,
+                                    fontSize   = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color      = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                                    maxLines   = 1
+                                )
+                            }
                         }
                     }
                 }
@@ -721,190 +755,352 @@ private fun QuickActionsRow(
     }
 }
 
-// ── Progress Cards ────────────────────────────────────────────────────────────
+// ── Section 4: Writing Progress — unified card ────────────────────────────────
 
 @Composable
-private fun ProgressCardsRow(
+private fun WritingProgressCard(
     todayWords: Int,
     dailyGoal: Int,
-    weekData: List<Pair<String, Int>>,  // (dayLabel, wordCount)
+    weekData: List<Pair<String, Int>>,
+    streak: Int,
+    totalWords: Int,
     accentColor: Color,
-    hazeState: dev.chrisbanes.haze.HazeState?
+    hazeState: dev.chrisbanes.haze.HazeState?,
+    onGoToStats: () -> Unit
 ) {
-    val hasBgImage = localHasBgImage()
+    val hasBgImage   = localHasBgImage()
     val solidSurface = LocalSolidSurface.current
-    val cardShape = RoundedCornerShape(16.dp)
-    val fallbackColor = if (hasBgImage) solidSurface.copy(alpha = 0.82f)
-                        else MaterialTheme.colorScheme.surface
+    val cardShape    = RoundedCornerShape(20.dp)
+    val onSurface    = MaterialTheme.colorScheme.onSurface
+    val outlineColor = MaterialTheme.colorScheme.outline
 
-    val weekTotal = weekData.sumOf { it.second }
-    val weekGoal = dailyGoal * 7
+    // Derived stats
+    val weekTotal      = weekData.sumOf { it.second }
+    val weekGoal       = dailyGoal * 7
+    val cal            = Calendar.getInstance()
+    val daysInMonth    = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
+    val monthGoal      = dailyGoal * daysInMonth
+    val monthWritten   = (weekTotal * (daysInMonth / 7f)).toInt()
+    val monthProgress  = if (monthGoal > 0)
+        (monthWritten.toFloat() / monthGoal).coerceIn(0f, 1f) else 0f
+    val animatedMonthProgress by animateFloatAsState(
+        targetValue   = monthProgress,
+        animationSpec = tween(700, easing = FastOutSlowInEasing),
+        label         = "month-progress"
+    )
 
-    Row(
+    // Next milestone
+    val milestones    = listOf(1_000, 5_000, 10_000, 25_000, 50_000, 75_000, 100_000, 120_000)
+    val nextMilestone = milestones.firstOrNull { it > totalWords } ?: (totalWords + 10_000)
+    val wordsToGo     = nextMilestone - totalWords
+
+    // Streak dot indicators from weekData
+    val streakDots = weekData.map { (label, count) -> Pair(label, count > 0) }
+
+    // Today goal met?
+    val goalMet = dailyGoal > 0 && todayWords >= dailyGoal
+
+    ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+            .padding(horizontal = 16.dp)
+            .frostedCard(hazeState, shape = cardShape),
+        shape  = cardShape,
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = frostedContainerColor(
+                fallback = if (hasBgImage) solidSurface.copy(alpha = 0.85f)
+                           else MaterialTheme.colorScheme.surface
+            )
+        ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
     ) {
-        // Today's Progress donut
-        ElevatedCard(
-            modifier = Modifier
-                .weight(1f)
-                .height(148.dp)
-                .frostedCard(hazeState, shape = cardShape),
-            shape = cardShape,
-            colors = CardDefaults.elevatedCardColors(
-                containerColor = frostedContainerColor(fallback = fallbackColor)
-            ),
-            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
-        ) {
-            FrostedCardContent {
-                Column(
+        FrostedCardContent {
+            Column(modifier = Modifier.fillMaxWidth()) {
+
+                // ── Card header ───────────────────────────────────────────────
+                Row(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 8.dp, vertical = 10.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.SpaceBetween
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment     = Alignment.CenterVertically
                 ) {
                     Text(
-                        "Today's Progress",
-                        fontSize = 9.sp,
+                        text       = "Your Progress",
+                        fontSize   = 14.sp,
                         fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                        color      = onSurface
                     )
-                    DonutChart(
-                        progress = if (dailyGoal > 0) (todayWords.toFloat() / dailyGoal).coerceIn(0f, 1f) else 0f,
-                        centerLabel = formatWordCount(todayWords),
-                        accentColor = accentColor,
-                        modifier = Modifier.size(60.dp)
+                    Text(
+                        text       = "Set Goal ›",
+                        fontSize   = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color      = accentColor,
+                        modifier   = Modifier.clickable { onGoToStats() }
                     )
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                }
+                HorizontalDivider(color = outlineColor.copy(alpha = 0.1f))
+
+                // ── Three stat columns ────────────────────────────────────────
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    // Column A: Today
+                    Column(
+                        modifier            = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        // Icon in accent circle
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(accentColor.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Edit,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint     = accentColor
+                            )
+                        }
                         Text(
-                            "/ ${formatWordCount(dailyGoal)} words",
-                            fontSize = 8.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+                            text     = "Today",
+                            fontSize = 10.sp,
+                            color    = onSurface.copy(alpha = 0.5f),
+                            fontWeight = FontWeight.Medium
                         )
-                        if (dailyGoal > 0) {
+                        Text(
+                            text       = formatWordCount(todayWords),
+                            fontSize   = 26.sp,
+                            fontWeight = FontWeight.Bold,
+                            color      = onSurface
+                        )
+                        Text(
+                            text     = "/ ${formatWordCount(dailyGoal)} words",
+                            fontSize = 11.sp,
+                            color    = onSurface.copy(alpha = 0.45f)
+                        )
+                        if (goalMet) {
                             Text(
-                                "${((todayWords.toFloat() / dailyGoal) * 100).toInt()}% of goal",
-                                fontSize = 8.sp,
-                                color = accentColor.copy(alpha = 0.8f)
+                                text       = "Goal reached! 🎉",
+                                fontSize   = 10.sp,
+                                color      = accentColor,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
-                }
-            }
-        }
 
-        // This Week mini bar chart
-        ElevatedCard(
-            modifier = Modifier
-                .weight(1f)
-                .height(148.dp)
-                .frostedCard(hazeState, shape = cardShape),
-            shape = cardShape,
-            colors = CardDefaults.elevatedCardColors(
-                containerColor = frostedContainerColor(fallback = fallbackColor)
-            ),
-            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
-        ) {
-            FrostedCardContent {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 8.dp, vertical = 10.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        "This Week",
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                    )
-                    MiniWeekBar(
-                        weekData = weekData,
-                        accentColor = accentColor,
+                    // Vertical divider
+                    Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp)
+                            .width(1.dp)
+                            .height(90.dp)
+                            .background(outlineColor.copy(alpha = 0.12f))
+                            .align(Alignment.CenterVertically)
                     )
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+
+                    // Column B: Streak
+                    Column(
+                        modifier            = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFFF6B00).copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("🔥", fontSize = 13.sp)
+                        }
                         Text(
-                            "${formatWordCount(weekTotal)} words",
-                            fontSize = 8.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                            text       = "Streak",
+                            fontSize   = 10.sp,
+                            color      = onSurface.copy(alpha = 0.5f),
+                            fontWeight = FontWeight.Medium
                         )
                         Text(
-                            "/ ${formatWordCount(weekGoal)} goal",
-                            fontSize = 8.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            text       = "$streak",
+                            fontSize   = 26.sp,
+                            fontWeight = FontWeight.Bold,
+                            color      = onSurface
+                        )
+                        Text(
+                            text     = "days",
+                            fontSize = 11.sp,
+                            color    = onSurface.copy(alpha = 0.45f)
+                        )
+                        // Day dots: M T W T F S S
+                        StreakDots(streakDots = streakDots, accentColor = accentColor)
+                    }
+
+                    // Vertical divider
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .height(90.dp)
+                            .background(outlineColor.copy(alpha = 0.12f))
+                            .align(Alignment.CenterVertically)
+                    )
+
+                    // Column C: Monthly Goal
+                    Column(
+                        modifier            = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(accentColor.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.TrackChanges,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint     = accentColor
+                            )
+                        }
+                        Text(
+                            text       = "Monthly",
+                            fontSize   = 10.sp,
+                            color      = onSurface.copy(alpha = 0.5f),
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text       = "${(monthProgress * 100).toInt()}%",
+                            fontSize   = 26.sp,
+                            fontWeight = FontWeight.Bold,
+                            color      = onSurface
+                        )
+                        Text(
+                            text     = "${formatWordCount(monthWritten)} written",
+                            fontSize = 11.sp,
+                            color    = onSurface.copy(alpha = 0.45f)
+                        )
+                        // Thin progress bar for monthly
+                        ThinProgressBar(
+                            progress    = animatedMonthProgress,
+                            accentColor = accentColor,
+                            modifier    = Modifier
+                                .fillMaxWidth(0.75f)
+                                .height(4.dp)
+                                .padding(top = 2.dp)
                         )
                     }
                 }
-            }
-        }
 
-        // Monthly Goal donut
-        ElevatedCard(
-            modifier = Modifier
-                .weight(1f)
-                .height(148.dp)
-                .frostedCard(hazeState, shape = cardShape),
-            shape = cardShape,
-            colors = CardDefaults.elevatedCardColors(
-                containerColor = frostedContainerColor(fallback = fallbackColor)
-            ),
-            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
-        ) {
-            FrostedCardContent {
-                val cal = Calendar.getInstance()
-                val daysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
-                val monthGoal = dailyGoal * daysInMonth
-                val monthProgress = if (monthGoal > 0)
-                    (weekTotal.toFloat() * (daysInMonth / 7f) / monthGoal).coerceIn(0f, 1f)
-                else 0f
+                HorizontalDivider(color = outlineColor.copy(alpha = 0.1f))
 
+                // ── This Week bar chart ───────────────────────────────────────
                 Column(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 8.dp, vertical = 10.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.SpaceBetween
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
                 ) {
-                    Text(
-                        "Monthly Goal",
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                    )
-                    DonutChart(
-                        progress = monthProgress,
-                        centerLabel = "${(monthProgress * 100).toInt()}%",
-                        accentColor = accentColor,
-                        modifier = Modifier.size(60.dp)
-                    )
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Row(
+                        modifier              = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment     = Alignment.CenterVertically
+                    ) {
                         Text(
-                            "/ ${formatWordCount(monthGoal)} words",
-                            fontSize = 8.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+                            text       = "This Week",
+                            fontSize   = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color      = onSurface.copy(alpha = 0.6f)
                         )
                         Text(
-                            "${formatWordCount((weekTotal * (daysInMonth / 7f)).toInt())} written",
-                            fontSize = 8.sp,
-                            color = accentColor.copy(alpha = 0.8f)
+                            text     = "${formatWordCount(weekTotal)} / ${formatWordCount(weekGoal)} words",
+                            fontSize = 11.sp,
+                            color    = onSurface.copy(alpha = 0.45f)
                         )
                     }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    MiniWeekBar(
+                        weekData    = weekData,
+                        accentColor = accentColor,
+                        modifier    = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                    )
+                }
+
+                HorizontalDivider(color = outlineColor.copy(alpha = 0.1f))
+
+                // ── Next Milestone row ────────────────────────────────────────
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onGoToStats() }
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment     = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment     = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Star,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint     = onSurface.copy(alpha = 0.5f)
+                        )
+                        Text(
+                            text       = "Next Milestone",
+                            fontSize   = 12.sp,
+                            color      = onSurface.copy(alpha = 0.55f),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Row(
+                        verticalAlignment     = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text       = "${formatWordCount(wordsToGo)} words to ${formatWordCount(nextMilestone)}",
+                            fontSize   = 12.sp,
+                            color      = accentColor,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Icon(
+                            Icons.Default.ChevronRight,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint     = accentColor
+                        )
+                    }
+                }
+
+                // ── Motivational quote (only when 0 words written today) ──────
+                if (todayWords == 0) {
+                    HorizontalDivider(color = outlineColor.copy(alpha = 0.1f))
+                    Text(
+                        text      = "\" A page a day builds a world. \"",
+                        fontSize  = 12.sp,
+                        fontStyle = FontStyle.Italic,
+                        color     = onSurface.copy(alpha = 0.38f),
+                        textAlign = TextAlign.Center,
+                        modifier  = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                    )
                 }
             }
         }
     }
 }
 
-// ── Recent Chapters card (single card, divider rows) ─────────────────────────
+// ── Section 5: Recent Chapters card ──────────────────────────────────────────
 
 @Composable
 private fun RecentChaptersCard(
@@ -914,9 +1110,9 @@ private fun RecentChaptersCard(
     onSeeAll: () -> Unit,
     onOpenNote: (noteId: String, bookId: String) -> Unit
 ) {
-    val hasBgImage = localHasBgImage()
+    val hasBgImage   = localHasBgImage()
     val solidSurface = LocalSolidSurface.current
-    val cardShape = RoundedCornerShape(16.dp)
+    val cardShape    = RoundedCornerShape(16.dp)
     val outlineColor = MaterialTheme.colorScheme.outline
 
     ElevatedCard(
@@ -924,7 +1120,7 @@ private fun RecentChaptersCard(
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
             .frostedCard(hazeState, shape = cardShape),
-        shape = cardShape,
+        shape  = cardShape,
         colors = CardDefaults.elevatedCardColors(
             containerColor = frostedContainerColor(
                 fallback = if (hasBgImage) solidSurface.copy(alpha = 0.85f)
@@ -941,20 +1137,20 @@ private fun RecentChaptersCard(
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment     = Alignment.CenterVertically
                 ) {
                     Text(
-                        "Recent Chapters",
-                        fontSize = 13.sp,
+                        text       = "Continue where you left off",
+                        fontSize   = 13.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color      = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        "See All",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = accentColor,
-                        modifier = Modifier.clickable { onSeeAll() }
+                        text       = "See All ›",
+                        fontSize   = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color      = accentColor,
+                        modifier   = Modifier.clickable { onSeeAll() }
                     )
                 }
                 HorizontalDivider(color = outlineColor.copy(alpha = 0.12f))
@@ -964,23 +1160,34 @@ private fun RecentChaptersCard(
                     val wordCount = remember(chapter.content) {
                         chapter.content.split("\\s+".toRegex()).count { it.isNotBlank() }
                     }
+                    // First non-blank line of content as preview
+                    val previewLine = remember(chapter.content) {
+                        chapter.content
+                            .lines()
+                            .firstOrNull { it.isNotBlank() }
+                            ?.trim()
+                            ?.take(70)
+                            ?: ""
+                    }
+                    val isFirst = index == 0
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onOpenNote(chapter.id, chapter.bookId) }
                             .padding(horizontal = 14.dp, vertical = 11.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                        verticalAlignment     = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // Outlined icon box — transparent background, border only
+                        // Icon box
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(8.dp))
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(10.dp))
                                 .border(
                                     width = 1.dp,
                                     color = outlineColor.copy(alpha = 0.3f),
-                                    shape = RoundedCornerShape(8.dp)
+                                    shape = RoundedCornerShape(10.dp)
                                 ),
                             contentAlignment = Alignment.Center
                         ) {
@@ -988,33 +1195,69 @@ private fun RecentChaptersCard(
                                 Icons.Default.Article,
                                 contentDescription = null,
                                 modifier = Modifier.size(18.dp),
-                                tint = accentColor.copy(alpha = 0.8f)
+                                tint     = accentColor.copy(alpha = 0.8f)
                             )
                         }
 
+                        // Text column
                         Column(modifier = Modifier.weight(1f)) {
-                            // Chapter title — marquee scrolling when too long
                             Text(
-                                text = chapter.name,
+                                text       = chapter.name,
                                 fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                modifier = Modifier.basicMarquee()
+                                fontSize   = 13.sp,
+                                color      = MaterialTheme.colorScheme.onSurface,
+                                maxLines   = 1,
+                                modifier   = Modifier.basicMarquee()
                             )
                             Text(
-                                text = "${formatRelativeTime(chapter.updatedAt)}  •  $wordCount words",
+                                text     = "${formatRelativeTime(chapter.updatedAt)}  ·  $wordCount words",
                                 fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                                color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
                                 maxLines = 1
                             )
+                            // Preview line — first sentence of chapter content
+                            if (previewLine.isNotEmpty()) {
+                                Text(
+                                    text     = previewLine,
+                                    fontSize = 12.sp,
+                                    color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    fontStyle = FontStyle.Italic
+                                )
+                            } else {
+                                Text(
+                                    text      = "No content yet",
+                                    fontSize  = 12.sp,
+                                    color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+                                    fontStyle = FontStyle.Italic
+                                )
+                            }
+                        }
+
+                        // "Continue" button on the most recent chapter only
+                        if (isFirst) {
+                            OutlinedButton(
+                                onClick  = { onOpenNote(chapter.id, chapter.bookId) },
+                                modifier = Modifier.height(32.dp),
+                                shape    = RoundedCornerShape(8.dp),
+                                border   = BorderStroke(1.dp, accentColor.copy(alpha = 0.4f)),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+                            ) {
+                                Text(
+                                    text       = "Continue",
+                                    fontSize   = 11.sp,
+                                    color      = accentColor,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
                     }
-                    // Divider between rows, not after last
+
                     if (index < chapters.lastIndex) {
                         HorizontalDivider(
-                            modifier = Modifier.padding(start = 62.dp, end = 14.dp),
-                            color = outlineColor.copy(alpha = 0.08f)
+                            modifier = Modifier.padding(start = 64.dp, end = 14.dp),
+                            color    = outlineColor.copy(alpha = 0.08f)
                         )
                     }
                 }
@@ -1034,13 +1277,13 @@ private fun BookPickerSheet(
     onSelect: (Book) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sheetState   = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val solidSurface = LocalSolidSurface.current
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = solidSurface,
+        sheetState       = sheetState,
+        containerColor   = solidSurface,
         dragHandle = {
             Box(
                 modifier = Modifier
@@ -1060,14 +1303,14 @@ private fun BookPickerSheet(
             Text(
                 "Set Ongoing Project",
                 fontWeight = FontWeight.Bold,
-                fontSize = 18.sp,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(bottom = 4.dp)
+                fontSize   = 18.sp,
+                color      = MaterialTheme.colorScheme.onSurface,
+                modifier   = Modifier.padding(bottom = 4.dp)
             )
             Text(
                 "A Chapters folder will be created in the selected book.",
                 fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                 modifier = Modifier.padding(bottom = 16.dp)
             )
 
@@ -1084,6 +1327,7 @@ private fun BookPickerSheet(
                     )
                 }
             } else {
+                val context = LocalContext.current
                 books.forEach { book ->
                     val isSelected = book.id == currentOngoingId
                     Row(
@@ -1096,7 +1340,7 @@ private fun BookPickerSheet(
                             )
                             .clickable { onSelect(book) }
                             .padding(horizontal = 12.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                        verticalAlignment     = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         // Mini cover
@@ -1105,7 +1349,6 @@ private fun BookPickerSheet(
                                 .size(width = 36.dp, height = 50.dp)
                                 .clip(RoundedCornerShape(4.dp))
                         ) {
-                            val context = LocalContext.current
                             if (book.coverUri != null) {
                                 AsyncImage(
                                     model = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
@@ -1115,8 +1358,8 @@ private fun BookPickerSheet(
                                             .build()
                                     } else book.coverUri,
                                     contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
+                                    contentScale       = ContentScale.Crop,
+                                    modifier           = Modifier.fillMaxSize()
                                 )
                             } else {
                                 Box(
@@ -1129,18 +1372,19 @@ private fun BookPickerSheet(
                                         Icons.Outlined.Book,
                                         contentDescription = null,
                                         modifier = Modifier.size(18.dp),
-                                        tint = accentColor
+                                        tint     = accentColor
                                     )
                                 }
                             }
                         }
 
                         Text(
-                            text = book.title,
+                            text       = book.title,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            fontSize = 15.sp,
-                            color = if (isSelected) accentColor else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f)
+                            fontSize   = 15.sp,
+                            color      = if (isSelected) accentColor
+                                         else MaterialTheme.colorScheme.onSurface,
+                            modifier   = Modifier.weight(1f)
                         )
 
                         if (isSelected) {
@@ -1148,7 +1392,7 @@ private fun BookPickerSheet(
                                 Icons.Default.Check,
                                 contentDescription = "Current project",
                                 modifier = Modifier.size(18.dp),
-                                tint = accentColor
+                                tint     = accentColor
                             )
                         }
                     }
@@ -1162,7 +1406,115 @@ private fun BookPickerSheet(
     }
 }
 
-// ── Chart primitives ──────────────────────────────────────────────────────────
+// ── Primitive: thin animated progress bar ────────────────────────────────────
+
+@Composable
+private fun ThinProgressBar(
+    progress: Float,
+    accentColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(progress.coerceIn(0f, 1f))
+                .fillMaxHeight()
+                .background(accentColor)
+        )
+    }
+}
+
+// ── Primitive: streak day dots ────────────────────────────────────────────────
+
+@Composable
+private fun StreakDots(
+    streakDots: List<Pair<String, Boolean>>,
+    accentColor: Color
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        streakDots.forEach { (_, hasWords) ->
+            Box(
+                modifier = Modifier
+                    .size(7.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (hasWords) accentColor
+                        else MaterialTheme.colorScheme.outlineVariant
+                    )
+            )
+        }
+    }
+}
+
+// ── Primitive: week bar chart (Canvas) ────────────────────────────────────────
+
+@Composable
+private fun MiniWeekBar(
+    weekData: List<Pair<String, Int>>,
+    accentColor: Color,
+    modifier: Modifier = Modifier
+) {
+    val maxVal      = remember(weekData) { (weekData.maxOfOrNull { it.second } ?: 1).coerceAtLeast(1) }
+    val trackColor  = MaterialTheme.colorScheme.outlineVariant
+    val labelColor  = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+    val animatedBars = weekData.mapIndexed { i, (label, count) ->
+        val anim by animateFloatAsState(
+            targetValue   = count.toFloat() / maxVal,
+            animationSpec = tween(400 + i * 40, easing = FastOutSlowInEasing),
+            label         = "bar-$i"
+        )
+        Triple(label, count, anim)
+    }
+
+    val labelHeightDp = 14.dp
+    BoxWithConstraints(modifier = modifier) {
+        val labelHeightPx = with(androidx.compose.ui.platform.LocalDensity.current) { labelHeightDp.toPx() }
+        androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+            val barCount     = animatedBars.size
+            val spacing      = size.width * 0.04f
+            val totalSpacing = spacing * (barCount - 1)
+            val barW         = (size.width - totalSpacing) / barCount
+            val chartH       = size.height - labelHeightPx
+            val radius       = barW / 2f
+
+            animatedBars.forEachIndexed { i, (label, _, fraction) ->
+                val left = i * (barW + spacing)
+                val barH = (fraction * chartH).coerceAtLeast(4f)
+                val top  = chartH - barH
+
+                drawRoundRect(
+                    color        = trackColor,
+                    topLeft      = Offset(left, 0f),
+                    size         = Size(barW, chartH),
+                    cornerRadius = CornerRadius(radius)
+                )
+                drawRoundRect(
+                    color        = accentColor,
+                    topLeft      = Offset(left, top),
+                    size         = Size(barW, barH),
+                    cornerRadius = CornerRadius(radius)
+                )
+                drawContext.canvas.nativeCanvas.drawText(
+                    label,
+                    left + barW / 2f,
+                    size.height - labelHeightPx * 0.1f,
+                    android.graphics.Paint().apply {
+                        color     = labelColor.toArgb()
+                        textSize  = labelHeightPx * 0.72f
+                        textAlign = android.graphics.Paint.Align.CENTER
+                        isAntiAlias = true
+                    }
+                )
+            }
+        }
+    }
+}
+
+// ── Primitive: DonutChart (kept for potential use in StatsScreen) ─────────────
 
 @Composable
 private fun DonutChart(
@@ -1172,121 +1524,49 @@ private fun DonutChart(
     modifier: Modifier = Modifier
 ) {
     val animatedSweep by animateFloatAsState(
-        targetValue = progress * 360f,
+        targetValue   = progress * 360f,
         animationSpec = tween(600, easing = FastOutSlowInEasing),
-        label = "donut-sweep"
+        label         = "donut-sweep"
     )
     val trackColor = MaterialTheme.colorScheme.outlineVariant
-    val onSurface = MaterialTheme.colorScheme.onSurface
+    val onSurface  = MaterialTheme.colorScheme.onSurface
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
+        androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
             val stroke = size.minDimension * 0.14f
-            val inset = stroke / 2f
-            val oval = androidx.compose.ui.geometry.Rect(
-                left = inset, top = inset,
-                right = size.width - inset, bottom = size.height - inset
+            val inset  = stroke / 2f
+            val oval   = androidx.compose.ui.geometry.Rect(
+                left   = inset, top   = inset,
+                right  = size.width - inset, bottom = size.height - inset
             )
-
-            // Track
             drawArc(
-                color = trackColor,
-                startAngle = -90f,
-                sweepAngle = 360f,
-                useCenter = false,
-                topLeft = Offset(oval.left, oval.top),
-                size = Size(oval.width, oval.height),
-                style = Stroke(width = stroke, cap = StrokeCap.Round)
+                color       = trackColor,
+                startAngle  = -90f,
+                sweepAngle  = 360f,
+                useCenter   = false,
+                topLeft     = Offset(oval.left, oval.top),
+                size        = Size(oval.width, oval.height),
+                style       = Stroke(width = stroke, cap = StrokeCap.Round)
             )
-            // Fill
             if (animatedSweep > 0f) {
                 drawArc(
-                    color = accentColor,
-                    startAngle = -90f,
-                    sweepAngle = animatedSweep,
-                    useCenter = false,
-                    topLeft = Offset(oval.left, oval.top),
-                    size = Size(oval.width, oval.height),
-                    style = Stroke(width = stroke, cap = StrokeCap.Round)
+                    color       = accentColor,
+                    startAngle  = -90f,
+                    sweepAngle  = animatedSweep,
+                    useCenter   = false,
+                    topLeft     = Offset(oval.left, oval.top),
+                    size        = Size(oval.width, oval.height),
+                    style       = Stroke(width = stroke, cap = StrokeCap.Round)
                 )
             }
         }
-
         Text(
-            text = centerLabel,
-            fontSize = 11.sp,
+            text       = centerLabel,
+            fontSize   = 11.sp,
             fontWeight = FontWeight.Bold,
-            color = onSurface,
-            maxLines = 1
+            color      = onSurface,
+            maxLines   = 1
         )
-    }
-}
-
-@Composable
-private fun MiniWeekBar(
-    weekData: List<Pair<String, Int>>,
-    accentColor: Color,
-    modifier: Modifier = Modifier
-) {
-    val maxVal = remember(weekData) {
-        (weekData.maxOfOrNull { it.second } ?: 1).coerceAtLeast(1)
-    }
-    val trackColor = MaterialTheme.colorScheme.outlineVariant
-    val labelColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-    val animatedBars = weekData.mapIndexed { i, (label, count) ->
-        val anim by animateFloatAsState(
-            targetValue = count.toFloat() / maxVal,
-            animationSpec = tween(400 + i * 40, easing = FastOutSlowInEasing),
-            label = "bar-$i"
-        )
-        Triple(label, count, anim)
-    }
-
-    // Reserve bottom 14dp for day letter labels
-    val labelHeightDp = 14.dp
-    BoxWithConstraints(modifier = modifier) {
-        val labelHeightPx = with(androidx.compose.ui.platform.LocalDensity.current) { labelHeightDp.toPx() }
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val barCount = animatedBars.size
-            val spacing = size.width * 0.04f
-            val totalSpacing = spacing * (barCount - 1)
-            val barW = (size.width - totalSpacing) / barCount
-            val chartH = size.height - labelHeightPx
-            val radius = barW / 2f
-
-            animatedBars.forEachIndexed { i, (label, _, fraction) ->
-                val left = i * (barW + spacing)
-                val barH = (fraction * chartH).coerceAtLeast(4f)
-                val top = chartH - barH
-
-                // Track
-                drawRoundRect(
-                    color = trackColor,
-                    topLeft = Offset(left, 0f),
-                    size = Size(barW, chartH),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius)
-                )
-                // Fill
-                drawRoundRect(
-                    color = accentColor,
-                    topLeft = Offset(left, top),
-                    size = Size(barW, barH),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius)
-                )
-                // Day letter label below bar
-                drawContext.canvas.nativeCanvas.drawText(
-                    label,
-                    left + barW / 2f,
-                    size.height - labelHeightPx * 0.1f,
-                    android.graphics.Paint().apply {
-                        color = labelColor.toArgb()
-                        textSize = labelHeightPx * 0.72f
-                        textAlign = android.graphics.Paint.Align.CENTER
-                        isAntiAlias = true
-                    }
-                )
-            }
-        }
     }
 }
 
@@ -1298,30 +1578,28 @@ private fun DashboardSectionLabel(text: String, inline: Boolean = false) {
         fallback = MaterialTheme.colorScheme.onSurface
     )
     Text(
-        text = text,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.SemiBold,
+        text          = text,
+        fontSize      = 13.sp,
+        fontWeight    = FontWeight.SemiBold,
         letterSpacing = 0.5.sp,
-        color = color.copy(alpha = 0.6f),
-        modifier = Modifier
+        color         = color.copy(alpha = 0.6f),
+        modifier      = Modifier
             .then(if (inline) Modifier else Modifier.padding(horizontal = 16.dp))
             .then(mod)
     )
 }
 
-private fun formatWordCount(count: Int): String {
-    return when {
-        count >= 1_000 -> "${count / 1_000}k"
-        else           -> "$count"
-    }
+private fun formatWordCount(count: Int): String = when {
+    count >= 1_000 -> "${count / 1_000}k"
+    else           -> "$count"
 }
 
 private fun formatRelativeTime(timestamp: Long): String {
-    val now = System.currentTimeMillis()
-    val diffMs = now - timestamp
-    val diffMin = diffMs / 60_000
+    val now      = System.currentTimeMillis()
+    val diffMs   = now - timestamp
+    val diffMin  = diffMs / 60_000
     val diffHours = diffMs / 3_600_000
-    val diffDays = diffMs / 86_400_000
+    val diffDays  = diffMs / 86_400_000
 
     return when {
         diffMin < 1    -> "Just now"
