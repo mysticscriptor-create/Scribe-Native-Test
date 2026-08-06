@@ -41,6 +41,9 @@ import androidx.compose.ui.res.painterResource
 import com.primaloptima.scribe.ui.theme.LocalAccentColor
 import android.graphics.Bitmap
 import android.os.Build
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.activity.ComponentActivity
 import com.primaloptima.scribe.ui.theme.LocalHazeState
 import com.primaloptima.scribe.ui.theme.localHasBgImage
 import com.primaloptima.scribe.ui.theme.LocalOneShotBitmap
@@ -105,69 +108,27 @@ fun HomeScreen(
     val view = LocalView.current
     val blurRadiusPx = com.primaloptima.scribe.ui.theme.LocalFrostedBlurRadius.current.toInt().coerceIn(1, 25)
 
-    // ── Left drawer one-shot blur (pre-API-31) ────────────────────────────────
-    // rawDrawerBitmap: screen capture taken INSIDE the gesture handler at the
-    // exact moment the swipe threshold is crossed — before drawerState.open() is
-    // called and before any recomposition happens. This guarantees the capture
-    // contains clean screen content with no drawer pixels in it.
-    //
-    // A separate LaunchedEffect watches rawDrawerBitmap and runs the heavy blur
-    // on IO while the drawer open animation plays (~300 ms). By the time the
-    // drawer finishes sliding in, oneShotBitmap is ready and replaces the
-    // barBlurBitmap placeholder with zero visible flash.
-    var oneShotBitmap    by remember { mutableStateOf<Bitmap?>(null) }
-    var rawDrawerBitmap  by remember { mutableStateOf<Bitmap?>(null) }
-
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-        // Blur on IO as soon as the raw capture lands
-        LaunchedEffect(rawDrawerBitmap) {
-            val raw = rawDrawerBitmap ?: return@LaunchedEffect
-            oneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                BitmapBlur.blurBitmap(raw, radius = blurRadiusPx)
-            }
-        }
-        // Clear only after the drawer has fully settled to Closed. currentValue
-        // flips after the close animation completes — the drawer is already
-        // off-screen by this point, so no visual glitch. targetValue was
-        // previously used here but it flips to Closed the moment the user
-        // releases mid-swipe (past halfway), triggering premature cleanup while
-        // the drawer was still visible. The delay(300) was a workaround for
-        // that race condition and is no longer needed.
-        LaunchedEffect(drawerState.currentValue) {
-            if (drawerState.currentValue == DrawerValue.Closed) {
-                oneShotBitmap   = null
-                rawDrawerBitmap = null
-            }
-        }
+    // Make the system navigation bar follow the app theme.
+    // We set it transparent so the frosted bottom bar shows through, with light
+    // or dark icons matching the current color scheme.
+    val isDarkTheme = !MaterialTheme.colorScheme.surface.luminance().let { it > 0.5f }
+    SideEffect {
+        val window = (view.context as? ComponentActivity)?.window ?: return@SideEffect
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        WindowInsetsControllerCompat(window, view).isAppearanceLightNavigationBars = !isDarkTheme
     }
 
-    // ── Right panel one-shot blur (pre-API-31) ────────────────────────────────
-    // Same early-capture pattern: rawRightBitmap is captured inside the gesture
-    // handler before rightPanelVisible flips to true, so the blur runs in
-    // parallel with the slide-in animation.
-    //
-    // Cleanup fires immediately when rightPanelVisible becomes false — no delay
-    // needed. The AnimatedVisibility exit animation plays while the panel is
-    // still composed; by the time this LaunchedEffect runs, the triggering
-    // gesture is already complete and the panel is animating out. Nulling the
-    // bitmaps here is safe and leak-free.
-    var rightOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var rawRightBitmap     by remember { mutableStateOf<Bitmap?>(null) }
+    // ── Left drawer blur (pre-API-31) ────────────────────────────────────────
+    // We use LocalBarBlurBitmap (derived from the background image by ScribeTheme)
+    // rather than a live screen capture. The live-capture path raced the 300 ms
+    // open animation on low-end devices and lost, producing a visible flash.
+    // LocalBarBlurBitmap is always ready before any UI is shown, so the drawer
+    // glass is correct from frame one — no capture, no async blur, no flash.
 
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-        LaunchedEffect(rawRightBitmap) {
-            val raw = rawRightBitmap ?: return@LaunchedEffect
-            rightOneShotBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                BitmapBlur.blurBitmap(raw, radius = blurRadiusPx)
-            }
-        }
-        LaunchedEffect(rightPanelVisible) {
-            if (!rightPanelVisible) {
-                rightOneShotBitmap = null
-                rawRightBitmap     = null
-            }
-        }
-    }
+    // ── Right panel blur (pre-API-31) ────────────────────────────────────────
+    // Same rationale as the left drawer: use LocalBarBlurBitmap instead of a
+    // live capture that races the slide-in animation.
 
     val hazeState = LocalHazeState.current
 
@@ -309,18 +270,11 @@ fun HomeScreen(
                 // which runs in parallel with the opening animation.
                 if (drawerState.isClosed && startX < size.width * 0.3f && totalX > threshold) {
                     change.consume()
-                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && rawDrawerBitmap == null) {
-                        rawDrawerBitmap = BitmapBlur.captureOnly(view)
-                    }
                     scope.launch { drawerState.open() }
                 }
                 // Right-edge swipe → open stats panel.
-                // Same early-capture: grab bitmap before the panel becomes visible.
                 if (!rightPanelVisible && startX > size.width * 0.72f && totalX < -threshold) {
                     change.consume()
-                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && rawRightBitmap == null) {
-                        rawRightBitmap = BitmapBlur.captureOnly(view)
-                    }
                     rightPanelVisible = true
                 }
             }
@@ -332,7 +286,7 @@ fun HomeScreen(
         drawerState = drawerState,
         gesturesEnabled = true,
         drawerContent = {
-            CompositionLocalProvider(LocalOneShotBitmap provides oneShotBitmap) {
+            CompositionLocalProvider(LocalOneShotBitmap provides LocalBarBlurBitmap.current) {
             ModalDrawerSheet(
                 drawerContainerColor = Color.Transparent,
                 modifier = Modifier
@@ -546,9 +500,6 @@ fun HomeScreen(
                     },
                     navigationIcon = {
                         IconButton(onClick = {
-                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && rawDrawerBitmap == null) {
-                                rawDrawerBitmap = BitmapBlur.captureOnly(view)
-                            }
                             scope.launch { drawerState.open() }
                         }) {
                             val (iconColor, iconModifier) = rememberAdaptiveTextColor(
@@ -564,40 +515,11 @@ fun HomeScreen(
                     },
                     actions = {
                         if (!isSearching) {
-                            IconButton(onClick = {
-                                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && rawRightBitmap == null) {
-                                    rawRightBitmap = BitmapBlur.captureOnly(view)
-                                }
-                                rightPanelVisible = true
-                            }) {
-                                Icon(Icons.Default.Info, contentDescription = "Overview")
-                            }
                             IconButton(onClick = { isSearching = true }) {
                                 Icon(Icons.Default.Search, contentDescription = "Search")
                             }
                         }
                         if (selectedNavTab == 1 && !isSearching) {
-                            if (isGridMode) {
-                                IconButton(onClick = {
-                                    val nextCols = if (gridColumns == 2) 3 else 2
-                                    gridColumns = nextCols
-                                    scope.launch { repo.setGridColumns(nextCols) }
-                                }) {
-                                    Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = MaterialTheme.colorScheme.primaryContainer,
-                                        modifier = Modifier.padding(2.dp)
-                                    ) {
-                                        Text(
-                                            text = "${gridColumns}C",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                }
-                            }
                             IconButton(onClick = { isGridMode = !isGridMode }) {
                                 Icon(
                                     if (isGridMode) Icons.Default.ViewList else Icons.Default.GridView,
@@ -606,13 +528,27 @@ fun HomeScreen(
                             }
                             var showSortMenu by remember { mutableStateOf(false) }
                             IconButton(onClick = { showSortMenu = true }) {
-                                Icon(Icons.Default.MoreVert, contentDescription = "Sort Options")
+                                Icon(Icons.Default.MoreVert, contentDescription = "More Options")
                             }
                             DropdownMenu(
                                 expanded = showSortMenu,
                                 onDismissRequest = { showSortMenu = false },
                                 containerColor = LocalSolidSurface.current
                             ) {
+                                // Grid column toggle (only shown in grid mode)
+                                if (isGridMode) {
+                                    DropdownMenuItem(
+                                        text = { Text(if (gridColumns == 2) "3 Columns" else "2 Columns") },
+                                        leadingIcon = { Icon(Icons.Default.GridView, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                        onClick = {
+                                            val nextCols = if (gridColumns == 2) 3 else 2
+                                            gridColumns = nextCols
+                                            scope.launch { repo.setGridColumns(nextCols) }
+                                            showSortMenu = false
+                                        }
+                                    )
+                                    HorizontalDivider()
+                                }
                                 DropdownMenuItem(
                                     text = { Text("Date Updated") },
                                     onClick = {
@@ -647,9 +583,10 @@ fun HomeScreen(
                 NavigationBar(
                     containerColor = Color.Transparent,
                     tonalElevation = 0.dp,
+                    windowInsets = WindowInsets.navigationBars,
                     modifier = Modifier
                         .frostedBar(hazeState)
-                        .windowInsetsPadding(WindowInsets.navigationBars)
+                        .height(56.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
                 ) {
                     val accentColor = LocalAccentColor.current
                     val navColors = NavigationBarItemDefaults.colors(
@@ -664,8 +601,8 @@ fun HomeScreen(
                             isSearching = false
                             scope.launch { pagerState.animateScrollToPage(0) }
                         },
-                        icon = { Icon(Icons.Default.Dashboard, contentDescription = "Dashboard") },
-                        label = { Text("Dashboard", fontSize = 10.sp) },
+                        icon = { Icon(Icons.Default.Dashboard, contentDescription = "Dashboard", modifier = Modifier.size(20.dp)) },
+                        label = { Text("Dashboard", fontSize = 9.sp) },
                         colors = navColors
                     )
                     NavigationBarItem(
@@ -675,8 +612,8 @@ fun HomeScreen(
                             isSearching = false
                             scope.launch { pagerState.animateScrollToPage(1) }
                         },
-                        icon = { Icon(Icons.Default.Book, contentDescription = "Books") },
-                        label = { Text("Books", fontSize = 10.sp) },
+                        icon = { Icon(Icons.Default.Book, contentDescription = "Books", modifier = Modifier.size(20.dp)) },
+                        label = { Text("Books", fontSize = 9.sp) },
                         colors = navColors
                     )
                     NavigationBarItem(
@@ -686,8 +623,8 @@ fun HomeScreen(
                             isSearching = false
                             scope.launch { pagerState.animateScrollToPage(2) }
                         },
-                        icon = { Icon(Icons.Default.StickyNote2, contentDescription = "Notes") },
-                        label = { Text("Notes", fontSize = 10.sp) },
+                        icon = { Icon(Icons.Default.StickyNote2, contentDescription = "Notes", modifier = Modifier.size(20.dp)) },
+                        label = { Text("Notes", fontSize = 9.sp) },
                         colors = navColors
                     )
                     NavigationBarItem(
@@ -697,8 +634,8 @@ fun HomeScreen(
                             isSearching = false
                             scope.launch { pagerState.animateScrollToPage(3) }
                         },
-                        icon = { Icon(Icons.Default.BarChart, contentDescription = "Statistics") },
-                        label = { Text("Statistics", fontSize = 10.sp) },
+                        icon = { Icon(Icons.Default.BarChart, contentDescription = "Statistics", modifier = Modifier.size(20.dp)) },
+                        label = { Text("Stats", fontSize = 9.sp) },
                         colors = navColors
                     )
                 }
@@ -1010,7 +947,7 @@ fun HomeScreen(
                     enter = slideInHorizontally(initialOffsetX = { it }, animationSpec = tween(200)),
                     exit = slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(200))
                 ) {
-                CompositionLocalProvider(LocalOneShotBitmap provides rightOneShotBitmap) {
+                CompositionLocalProvider(LocalOneShotBitmap provides LocalBarBlurBitmap.current) {
                 FrostedPanelContent {
                 Column(
                     modifier = Modifier
