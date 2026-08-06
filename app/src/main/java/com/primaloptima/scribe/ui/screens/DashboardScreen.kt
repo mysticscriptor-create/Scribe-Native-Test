@@ -91,6 +91,10 @@ fun DashboardTabContent(
     val hazeState = LocalHazeState.current
     val accentColor = LocalAccentColor.current
 
+    // Supply LocalBarBlurBitmap as the one-shot source for all frosted cards on
+    // pre-API-31 devices. Cards are always visible (no screen-capture needed), so
+    // the static pre-blurred wallpaper bitmap is the correct placeholder.
+    CompositionLocalProvider(LocalOneShotBitmap provides LocalBarBlurBitmap.current) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 24.dp)
@@ -195,6 +199,8 @@ fun DashboardTabContent(
             }
         }
     }
+
+    } // end CompositionLocalProvider(LocalOneShotBitmap)
 
     // ── Book picker bottom sheet ──────────────────────────────────────────────
     if (showBookPicker) {
@@ -309,7 +315,7 @@ private fun NoProjectCard(
                            else MaterialTheme.colorScheme.surface
             )
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
     ) {
         FrostedCardContent {
             Column(
@@ -409,7 +415,7 @@ private fun CurrentProjectCard(
                            else MaterialTheme.colorScheme.surface
             )
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
     ) {
         FrostedCardContent {
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -419,12 +425,12 @@ private fun CurrentProjectCard(
                     modifier = Modifier.padding(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    // Cover thumbnail
+                    // Cover thumbnail — tall hero matching image 2 proportions
                     Box(
                         modifier = Modifier
-                            .size(width = 72.dp, height = 100.dp)
-                            .shadow(6.dp, RoundedCornerShape(8.dp))
-                            .clip(RoundedCornerShape(8.dp))
+                            .size(width = 96.dp, height = 136.dp)
+                            .shadow(8.dp, RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(10.dp))
                             .clickable { onOpenBook() }
                     ) {
                         if (book.coverUri != null) {
@@ -497,32 +503,37 @@ private fun CurrentProjectCard(
                             )
                         }
 
-                        // Progress bar
+                        // Progress bar with inline percentage label (image 2 style)
                         val barTrack = MaterialTheme.colorScheme.outlineVariant
-                        Canvas(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(6.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            val radius = size.height / 2f
-                            drawRoundRect(
-                                color = barTrack,
-                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius)
-                            )
-                            if (animatedProgress > 0f) {
+                            Canvas(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(6.dp)
+                            ) {
+                                val radius = size.height / 2f
                                 drawRoundRect(
-                                    color = accentColor,
-                                    size = Size(size.width * animatedProgress, size.height),
+                                    color = barTrack,
                                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius)
                                 )
+                                if (animatedProgress > 0f) {
+                                    drawRoundRect(
+                                        color = accentColor,
+                                        size = Size(size.width * animatedProgress, size.height),
+                                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius)
+                                    )
+                                }
                             }
+                            Text(
+                                text = "${(progressFraction * 100).toInt()}%",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = accentColor
+                            )
                         }
-
-                        Text(
-                            text = "${(progressFraction * 100).toInt()}%",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                        )
 
                         // Last edited
                         if (lastChapter != null) {
@@ -647,23 +658,30 @@ private fun QuickActionsRow(
             .padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        actions.forEach { (icon, label, action) ->
+        actions.forEachIndexed { index, (icon, label, action) ->
+            val isWrite = index == 0  // "Write" is always the first action — primary CTA
             ElevatedCard(
                 modifier = Modifier
                     .weight(1f)
                     .aspectRatio(0.85f)
-                    .frostedCard(hazeState, shape = cardShape)
+                    .then(
+                        // Write button: accent background (no frosted, always solid)
+                        // Others: frosted card modifier as normal
+                        if (isWrite) Modifier else Modifier.frostedCard(hazeState, shape = cardShape)
+                    )
                     .clickable { action() },
                 shape = cardShape,
                 colors = CardDefaults.elevatedCardColors(
-                    containerColor = frostedContainerColor(
+                    containerColor = if (isWrite) accentColor
+                    else frostedContainerColor(
                         fallback = if (hasBgImage) solidSurface.copy(alpha = 0.82f)
                                    else MaterialTheme.colorScheme.surface
                     )
                 ),
-                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 1.dp)
+                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
             ) {
-                FrostedCardContent {
+                // Write button uses plain content (no frosted wrapper — it's a solid accent card)
+                if (isWrite) {
                     Column(
                         modifier = Modifier.fillMaxSize(),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -673,16 +691,39 @@ private fun QuickActionsRow(
                             imageVector = icon,
                             contentDescription = label,
                             modifier = Modifier.size(22.dp),
-                            tint = accentColor
+                            tint = Color.White
                         )
                         Spacer(modifier = Modifier.height(5.dp))
                         Text(
                             text = label,
                             fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White,
                             maxLines = 1
                         )
+                    }
+                } else {
+                    FrostedCardContent {
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = label,
+                                modifier = Modifier.size(20.dp),
+                                tint = accentColor
+                            )
+                            Spacer(modifier = Modifier.height(5.dp))
+                            Text(
+                                text = label,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                                maxLines = 1
+                            )
+                        }
                     }
                 }
             }
@@ -725,7 +766,7 @@ private fun ProgressCardsRow(
             colors = CardDefaults.elevatedCardColors(
                 containerColor = frostedContainerColor(fallback = fallbackColor)
             ),
-            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 1.dp)
+            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
         ) {
             FrostedCardContent {
                 Column(
@@ -736,7 +777,7 @@ private fun ProgressCardsRow(
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        "Today",
+                        "Today's Progress",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
@@ -747,11 +788,20 @@ private fun ProgressCardsRow(
                         accentColor = accentColor,
                         modifier = Modifier.size(64.dp)
                     )
-                    Text(
-                        "/ ${formatWordCount(dailyGoal)} goal",
-                        fontSize = 9.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "/ ${formatWordCount(dailyGoal)} words",
+                            fontSize = 9.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+                        )
+                        if (dailyGoal > 0) {
+                            Text(
+                                "${((todayWords.toFloat() / dailyGoal) * 100).toInt()}% of daily goal",
+                                fontSize = 8.sp,
+                                color = accentColor.copy(alpha = 0.8f)
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -766,7 +816,7 @@ private fun ProgressCardsRow(
             colors = CardDefaults.elevatedCardColors(
                 containerColor = frostedContainerColor(fallback = fallbackColor)
             ),
-            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 1.dp)
+            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
         ) {
             FrostedCardContent {
                 Column(
@@ -789,11 +839,19 @@ private fun ProgressCardsRow(
                             .fillMaxWidth()
                             .height(48.dp)
                     )
-                    Text(
-                        "${formatWordCount(weekTotal)} words",
-                        fontSize = 9.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "${formatWordCount(weekTotal)} words",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                        Text(
+                            "/ ${formatWordCount(weekGoal)} goal",
+                            fontSize = 8.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                        )
+                    }
                 }
             }
         }
@@ -808,7 +866,7 @@ private fun ProgressCardsRow(
             colors = CardDefaults.elevatedCardColors(
                 containerColor = frostedContainerColor(fallback = fallbackColor)
             ),
-            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 1.dp)
+            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
         ) {
             FrostedCardContent {
                 val cal = Calendar.getInstance()
@@ -828,7 +886,7 @@ private fun ProgressCardsRow(
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        "Monthly",
+                        "Monthly Goal",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
@@ -839,11 +897,18 @@ private fun ProgressCardsRow(
                         accentColor = accentColor,
                         modifier = Modifier.size(64.dp)
                     )
-                    Text(
-                        "/ ${formatWordCount(monthGoal)} goal",
-                        fontSize = 9.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "/ ${formatWordCount(monthGoal)} words",
+                            fontSize = 9.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+                        )
+                        Text(
+                            "${formatWordCount((weekTotal * (daysInMonth / 7f)).toInt())} written",
+                            fontSize = 8.sp,
+                            color = accentColor.copy(alpha = 0.8f)
+                        )
+                    }
                 }
             }
         }
@@ -879,7 +944,7 @@ private fun RecentChapterRow(
                            else MaterialTheme.colorScheme.surface
             )
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
     ) {
         FrostedCardContent {
             Row(
@@ -913,26 +978,13 @@ private fun RecentChapterRow(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    // Timestamp • word count on one line — image 2 style
                     Text(
-                        text = formatRelativeTime(note.updatedAt),
+                        text = "${formatRelativeTime(note.updatedAt)}  •  $wordCount words",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
                     )
                 }
-
-                Text(
-                    text = "$wordCount words",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = accentColor
-                )
-
-                Icon(
-                    Icons.Default.ChevronRight,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-                )
             }
         }
     }
