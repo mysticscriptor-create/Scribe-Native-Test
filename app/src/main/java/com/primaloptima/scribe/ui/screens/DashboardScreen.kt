@@ -3,6 +3,9 @@ package com.primaloptima.scribe.ui.screens
 import android.content.Intent
 import android.os.Build
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.border
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -158,8 +161,6 @@ fun DashboardTabContent(
         // ── Progress cards ────────────────────────────────────────────────────
         item {
             Spacer(modifier = Modifier.height(20.dp))
-            DashboardSectionLabel("Progress")
-            Spacer(modifier = Modifier.height(10.dp))
             ProgressCardsRow(
                 todayWords = todayWords,
                 dailyGoal = dailyGoal,
@@ -173,29 +174,13 @@ fun DashboardTabContent(
         if (ongoingBook != null && chapters.isNotEmpty()) {
             item {
                 Spacer(modifier = Modifier.height(20.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    DashboardSectionLabel("Recent Chapters", inline = true)
-                    TextButton(onClick = { ongoingBook?.let { onOpenBook(it) } }) {
-                        Text("See All", fontSize = 12.sp, color = accentColor)
-                    }
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-            }
-
-            items(chapters.take(3), key = { it.id }) { chapter ->
-                RecentChapterRow(
-                    note = chapter,
+                RecentChaptersCard(
+                    chapters = chapters.take(3),
                     accentColor = accentColor,
                     hazeState = hazeState,
-                    onClick = { onOpenNote(chapter.id, chapter.bookId) }
+                    onSeeAll = { ongoingBook?.let { onOpenBook(it) } },
+                    onOpenChapter = { chapter -> onOpenNote(chapter.id, chapter.bookId) }
                 )
-                Spacer(modifier = Modifier.height(8.dp))
             }
         }
     }
@@ -464,108 +449,117 @@ private fun CurrentProjectCard(
                         }
                     }
 
-                    // Title + stats
+                    // Title + stats — constrained to cover height
                     Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(136.dp),          // match cover height exactly
+                        verticalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(
-                            "CURRENT PROJECT",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            letterSpacing = 1.5.sp,
-                            color = accentColor
-                        )
-                        Text(
-                            text = book.title,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 17.sp,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-
-                        // Word count + percentage
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
+                        // Top block: label + title + word count + progress bar
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(
-                                text = formatWordCount(totalWords),
-                                fontSize = 13.sp,
+                                "CURRENT PROJECT",
+                                fontSize = 9.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "/ ${formatWordCount(targetGoal)} words",
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                            )
-                        }
-
-                        // Progress bar with inline percentage label (image 2 style)
-                        val barTrack = MaterialTheme.colorScheme.outlineVariant
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Canvas(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(6.dp)
-                            ) {
-                                val radius = size.height / 2f
-                                drawRoundRect(
-                                    color = barTrack,
-                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius)
-                                )
-                                if (animatedProgress > 0f) {
-                                    drawRoundRect(
-                                        color = accentColor,
-                                        size = Size(size.width * animatedProgress, size.height),
-                                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius)
-                                    )
-                                }
-                            }
-                            Text(
-                                text = "${(progressFraction * 100).toInt()}%",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                letterSpacing = 1.5.sp,
                                 color = accentColor
                             )
-                        }
-
-                        // Last edited
-                        if (lastChapter != null) {
-                            HorizontalDivider(
-                                modifier = Modifier.padding(vertical = 2.dp),
-                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                            Text(
+                                text = book.title,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
+
+                            // Word count
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = formatWordCount(totalWords),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "/ ${formatWordCount(targetGoal)} words",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                )
+                            }
+
+                            // Progress bar + percentage
+                            val barTrack = MaterialTheme.colorScheme.outlineVariant
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Icon(
-                                    Icons.Default.Article,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(12.dp),
-                                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+                                Canvas(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(5.dp)
+                                ) {
+                                    val radius = size.height / 2f
+                                    drawRoundRect(
+                                        color = barTrack,
+                                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius)
+                                    )
+                                    if (animatedProgress > 0f) {
+                                        drawRoundRect(
+                                            color = accentColor,
+                                            size = Size(size.width * animatedProgress, size.height),
+                                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = "${(progressFraction * 100).toInt()}%",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = accentColor
                                 )
-                                Column {
+                            }
+                        }
+
+                        // Bottom block: "Last edited" label + chapter row
+                        if (lastChapter != null) {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = "Last edited",
+                                    fontSize = 9.sp,
+                                    letterSpacing = 0.3.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                                )
+                                // Icon + chapter name on the same row
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Article,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(12.dp),
+                                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+                                    )
                                     Text(
                                         text = lastChapter.name,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
-                                    Text(
-                                        text = lastTimestamp ?: "",
-                                        fontSize = 10.sp,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                                    )
                                 }
+                                // Timestamp below
+                                Text(
+                                    text = lastTimestamp ?: "",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                                )
                             }
                         }
                     }
@@ -756,11 +750,11 @@ private fun ProgressCardsRow(
             .padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Today's Progress donut
+        // ── Today's Progress donut ──────────────────────────────────────────
         ElevatedCard(
             modifier = Modifier
                 .weight(1f)
-                .aspectRatio(0.85f)
+                .aspectRatio(0.78f)
                 .frostedCard(hazeState, shape = cardShape),
             shape = cardShape,
             colors = CardDefaults.elevatedCardColors(
@@ -772,33 +766,39 @@ private fun ProgressCardsRow(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(10.dp),
+                        .padding(horizontal = 8.dp, vertical = 10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
                         "Today's Progress",
-                        fontSize = 10.sp,
+                        fontSize = 9.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                        maxLines = 1
                     )
                     DonutChart(
                         progress = if (dailyGoal > 0) (todayWords.toFloat() / dailyGoal).coerceIn(0f, 1f) else 0f,
                         centerLabel = formatWordCount(todayWords),
                         accentColor = accentColor,
-                        modifier = Modifier.size(64.dp)
+                        modifier = Modifier.size(60.dp)
                     )
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(1.dp)
+                    ) {
                         Text(
                             "/ ${formatWordCount(dailyGoal)} words",
-                            fontSize = 9.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+                            fontSize = 8.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                            maxLines = 1
                         )
                         if (dailyGoal > 0) {
                             Text(
-                                "${((todayWords.toFloat() / dailyGoal) * 100).toInt()}% of daily goal",
+                                "${((todayWords.toFloat() / dailyGoal) * 100).toInt()}% of goal",
                                 fontSize = 8.sp,
-                                color = accentColor.copy(alpha = 0.8f)
+                                color = accentColor.copy(alpha = 0.8f),
+                                maxLines = 1
                             )
                         }
                     }
@@ -806,11 +806,11 @@ private fun ProgressCardsRow(
             }
         }
 
-        // This Week mini bar chart
+        // ── This Week bar chart ─────────────────────────────────────────────
         ElevatedCard(
             modifier = Modifier
                 .weight(1f)
-                .aspectRatio(0.85f)
+                .aspectRatio(0.78f)
                 .frostedCard(hazeState, shape = cardShape),
             shape = cardShape,
             colors = CardDefaults.elevatedCardColors(
@@ -822,45 +822,50 @@ private fun ProgressCardsRow(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(10.dp),
+                        .padding(horizontal = 8.dp, vertical = 10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
                         "This Week",
-                        fontSize = 10.sp,
+                        fontSize = 9.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                        maxLines = 1
                     )
-                    MiniWeekBar(
+                    // Bar chart + day labels below each bar
+                    MiniWeekBarWithLabels(
                         weekData = weekData,
                         accentColor = accentColor,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
+                        modifier = Modifier.fillMaxWidth()
                     )
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(1.dp)
+                    ) {
                         Text(
                             "${formatWordCount(weekTotal)} words",
-                            fontSize = 9.sp,
+                            fontSize = 8.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                            maxLines = 1
                         )
                         Text(
                             "/ ${formatWordCount(weekGoal)} goal",
                             fontSize = 8.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                            maxLines = 1
                         )
                     }
                 }
             }
         }
 
-        // Monthly Goal donut
+        // ── Monthly Goal donut ──────────────────────────────────────────────
         ElevatedCard(
             modifier = Modifier
                 .weight(1f)
-                .aspectRatio(0.85f)
+                .aspectRatio(0.78f)
                 .frostedCard(hazeState, shape = cardShape),
             shape = cardShape,
             colors = CardDefaults.elevatedCardColors(
@@ -872,8 +877,6 @@ private fun ProgressCardsRow(
                 val cal = Calendar.getInstance()
                 val daysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
                 val monthGoal = dailyGoal * daysInMonth
-
-                // Approximate month words from weekData * ~4.3 weeks, clamped sensibly
                 val monthProgress = if (monthGoal > 0)
                     (weekTotal.toFloat() * (daysInMonth / 7f) / monthGoal).coerceIn(0f, 1f)
                 else 0f
@@ -881,32 +884,38 @@ private fun ProgressCardsRow(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(10.dp),
+                        .padding(horizontal = 8.dp, vertical = 10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
                         "Monthly Goal",
-                        fontSize = 10.sp,
+                        fontSize = 9.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                        maxLines = 1
                     )
                     DonutChart(
                         progress = monthProgress,
                         centerLabel = "${(monthProgress * 100).toInt()}%",
                         accentColor = accentColor,
-                        modifier = Modifier.size(64.dp)
+                        modifier = Modifier.size(60.dp)
                     )
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(1.dp)
+                    ) {
                         Text(
                             "/ ${formatWordCount(monthGoal)} words",
-                            fontSize = 9.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+                            fontSize = 8.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                            maxLines = 1
                         )
                         Text(
                             "${formatWordCount((weekTotal * (daysInMonth / 7f)).toInt())} written",
                             fontSize = 8.sp,
-                            color = accentColor.copy(alpha = 0.8f)
+                            color = accentColor.copy(alpha = 0.8f),
+                            maxLines = 1
                         )
                     }
                 }
@@ -915,78 +924,165 @@ private fun ProgressCardsRow(
     }
 }
 
-// ── Recent Chapter row ────────────────────────────────────────────────────────
+// ── Recent Chapters — single grouped card ─────────────────────────────────────
 
 @Composable
-private fun RecentChapterRow(
-    note: Note,
+private fun RecentChaptersCard(
+    chapters: List<Note>,
     accentColor: Color,
     hazeState: dev.chrisbanes.haze.HazeState?,
-    onClick: () -> Unit
+    onSeeAll: () -> Unit,
+    onOpenChapter: (Note) -> Unit
 ) {
     val hasBgImage = localHasBgImage()
     val solidSurface = LocalSolidSurface.current
-    val cardShape = RoundedCornerShape(14.dp)
-    val wordCount = remember(note.content) {
-        note.content.split("\\s+".toRegex()).count { it.isNotBlank() }
-    }
+    val cardShape = RoundedCornerShape(16.dp)
 
     ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
-            .frostedCard(hazeState, shape = cardShape)
-            .clickable { onClick() },
+            .frostedCard(hazeState, shape = cardShape),
         shape = cardShape,
         colors = CardDefaults.elevatedCardColors(
             containerColor = frostedContainerColor(
-                fallback = if (hasBgImage) solidSurface.copy(alpha = 0.82f)
+                fallback = if (hasBgImage) solidSurface.copy(alpha = 0.85f)
                            else MaterialTheme.colorScheme.surface
             )
         ),
         elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
     ) {
         FrostedCardContent {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Box(
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // Header row
+                Row(
                     modifier = Modifier
-                        .size(36.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(accentColor.copy(alpha = 0.12f)),
-                    contentAlignment = Alignment.Center
+                        .fillMaxWidth()
+                        .padding(start = 14.dp, end = 6.dp, top = 12.dp, bottom = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        Icons.Default.Article,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                        tint = accentColor
+                    Text(
+                        text = "Recent Chapters",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    TextButton(
+                        onClick = onSeeAll,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                    ) {
+                        Text("See All", fontSize = 12.sp, color = accentColor)
+                    }
+                }
+
+                // Chapter rows with slim dividers between them
+                chapters.forEachIndexed { index, chapter ->
+                    if (index > 0) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = 58.dp, end = 14.dp),
+                            thickness = 0.5.dp,
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+                        )
+                    }
+                    RecentChapterRowInline(
+                        note = chapter,
+                        accentColor = accentColor,
+                        onClick = { onOpenChapter(chapter) }
                     )
                 }
 
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = note.name,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    // Timestamp • word count on one line — image 2 style
-                    Text(
-                        text = "${formatRelativeTime(note.updatedAt)}  •  $wordCount words",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
-                    )
-                }
+                Spacer(modifier = Modifier.height(4.dp))
             }
         }
+    }
+}
+
+@Composable
+private fun RecentChapterRowInline(
+    note: Note,
+    accentColor: Color,
+    onClick: () -> Unit
+) {
+    val wordCount = remember(note.content) {
+        note.content.split("\\s+".toRegex()).count { it.isNotBlank() }
+    }
+    val outlineColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+    val cardBg = MaterialTheme.colorScheme.surface.copy(alpha = 0f) // transparent — same as card
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Outlined icon box — no fill, just border
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .border(
+                    width = 1.dp,
+                    color = outlineColor,
+                    shape = RoundedCornerShape(8.dp)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Default.Article,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+            )
+        }
+
+        Column(modifier = Modifier.weight(1f)) {
+            // Chapter title — scrolling marquee animation if too long
+            val scrollState = rememberScrollState()
+            val infiniteTransition = rememberInfiniteTransition(label = "scroll-${note.id}")
+            val scrollAnim by infiniteTransition.animateFloat(
+                initialValue = 0f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(3000, easing = LinearEasing, delayMillis = 800),
+                    repeatMode = RepeatMode.Restart
+                ),
+                label = "scroll-anim-${note.id}"
+            )
+            LaunchedEffect(scrollAnim) {
+                val maxScroll = scrollState.maxValue
+                if (maxScroll > 0) {
+                    scrollState.scrollTo((scrollAnim * maxScroll).toInt())
+                }
+            }
+
+            Text(
+                text = note.name,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Clip,
+                modifier = Modifier.horizontalScroll(scrollState, enabled = false)
+            )
+
+            Text(
+                text = "${formatRelativeTime(note.updatedAt)}  •  $wordCount words",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                maxLines = 1
+            )
+        }
+
+        // Three-dot menu indicator (subtle)
+        Icon(
+            Icons.Default.MoreVert,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+        )
     }
 }
 
@@ -1235,6 +1331,81 @@ private fun MiniWeekBar(
                 size = Size(barW, barH),
                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius)
             )
+        }
+    }
+}
+
+// ── Week bar chart with day labels ────────────────────────────────────────────
+
+@Composable
+private fun MiniWeekBarWithLabels(
+    weekData: List<Pair<String, Int>>,
+    accentColor: Color,
+    modifier: Modifier = Modifier
+) {
+    val maxVal = remember(weekData) {
+        (weekData.maxOfOrNull { it.second } ?: 1).coerceAtLeast(1)
+    }
+    val trackColor = MaterialTheme.colorScheme.outlineVariant
+    val labelColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+    val animatedFractions = weekData.mapIndexed { i, (_, count) ->
+        val anim by animateFloatAsState(
+            targetValue = count.toFloat() / maxVal,
+            animationSpec = tween(400 + i * 40, easing = FastOutSlowInEasing),
+            label = "bar-$i"
+        )
+        anim
+    }
+
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        // Bars
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) {
+            val barCount = weekData.size
+            val spacingPx = size.width * 0.04f
+            val totalSpacingPx = spacingPx * (barCount - 1)
+            val barW = (size.width - totalSpacingPx) / barCount
+            val chartH = size.height
+            val radius = barW / 2f
+
+            animatedFractions.forEachIndexed { i, fraction ->
+                val left = i * (barW + spacingPx)
+                val barH = (fraction * chartH).coerceAtLeast(4f)
+                val top = chartH - barH
+
+                drawRoundRect(
+                    color = trackColor,
+                    topLeft = Offset(left, 0f),
+                    size = Size(barW, chartH),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius)
+                )
+                drawRoundRect(
+                    color = accentColor,
+                    topLeft = Offset(left, top),
+                    size = Size(barW, barH),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(3.dp))
+
+        // Day labels — one per bar, evenly spread
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceAround
+        ) {
+            weekData.forEach { (label, _) ->
+                Text(
+                    text = label,
+                    fontSize = 7.sp,
+                    color = labelColor,
+                    maxLines = 1
+                )
+            }
         }
     }
 }
