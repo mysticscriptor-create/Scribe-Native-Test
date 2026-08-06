@@ -114,9 +114,9 @@ object GrainTexture {
 
         // Three independent LCG seeds — offset by large primes so channels are uncorrelated.
         val base = System.nanoTime()
-        var seedR = base xor 0x9E3779B97F4A7C15L
-        var seedG = base xor 0xBF58476D1CE4E5B9L
-        var seedB = base xor 0x94D049BB133111EBL
+        var seedR = base xor -7046029254386353131L
+        var seedG = base xor -4658895341759072839L
+        var seedB = base xor -7723592293110705909L
 
         for (i in pixels.indices) {
             // LCG step — same multiplier/increment as Numerical Recipes.
