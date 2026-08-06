@@ -56,6 +56,7 @@ import com.primaloptima.scribe.ui.theme.FrostedPanelContent
 
 import androidx.compose.material3.LocalContentColor
 import com.primaloptima.scribe.util.BitmapBlur
+import com.primaloptima.scribe.util.GrainTexture
 import androidx.compose.ui.platform.LocalView
 import com.primaloptima.scribe.ui.theme.rememberAdaptiveTextColor
 import dev.chrisbanes.haze.hazeSource
@@ -125,12 +126,15 @@ fun HomeScreen(
                 BitmapBlur.blurBitmap(raw, radius = blurRadiusPx)
             }
         }
-        // Clear when drawer fully settles back to Closed (single stable key — no
-        // mid-flight cancellations from currentValue flickering during swipe)
-        LaunchedEffect(drawerState.targetValue) {
-            if (drawerState.targetValue == DrawerValue.Closed) {
-                // Wait for the close animation before releasing bitmaps
-                kotlinx.coroutines.delay(300)
+        // Clear only after the drawer has fully settled to Closed. currentValue
+        // flips after the close animation completes — the drawer is already
+        // off-screen by this point, so no visual glitch. targetValue was
+        // previously used here but it flips to Closed the moment the user
+        // releases mid-swipe (past halfway), triggering premature cleanup while
+        // the drawer was still visible. The delay(300) was a workaround for
+        // that race condition and is no longer needed.
+        LaunchedEffect(drawerState.currentValue) {
+            if (drawerState.currentValue == DrawerValue.Closed) {
                 oneShotBitmap   = null
                 rawDrawerBitmap = null
             }
@@ -141,6 +145,12 @@ fun HomeScreen(
     // Same early-capture pattern: rawRightBitmap is captured inside the gesture
     // handler before rightPanelVisible flips to true, so the blur runs in
     // parallel with the slide-in animation.
+    //
+    // Cleanup fires immediately when rightPanelVisible becomes false — no delay
+    // needed. The AnimatedVisibility exit animation plays while the panel is
+    // still composed; by the time this LaunchedEffect runs, the triggering
+    // gesture is already complete and the panel is animating out. Nulling the
+    // bitmaps here is safe and leak-free.
     var rightOneShotBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var rawRightBitmap     by remember { mutableStateOf<Bitmap?>(null) }
 
@@ -153,7 +163,6 @@ fun HomeScreen(
         }
         LaunchedEffect(rightPanelVisible) {
             if (!rightPanelVisible) {
-                kotlinx.coroutines.delay(250)
                 rightOneShotBitmap = null
                 rawRightBitmap     = null
             }
@@ -173,6 +182,19 @@ fun HomeScreen(
 
     LaunchedEffect(Unit) {
         repo.gridColumnsFlow.collectLatest { gridColumns = it }
+    }
+
+    // Pre-bake grain texture on first composition so the first drawer open uses
+    // the cached bitmap rather than the inline LCG fallback. Warm-up runs on IO
+    // inside GrainTexture; this call returns immediately.
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && localHasBgImage()) {
+        val screenW = view.rootView.width
+        val screenH = view.rootView.height
+        LaunchedEffect(screenW, screenH) {
+            if (screenW > 0 && screenH > 0) {
+                GrainTexture.warmUp(screenW, screenH)
+            }
+        }
     }
 
     val pagerState = rememberPagerState(initialPage = initialPage) { 4 }
