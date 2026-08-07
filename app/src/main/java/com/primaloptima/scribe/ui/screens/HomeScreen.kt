@@ -111,7 +111,12 @@ fun HomeScreen(
     // Make the system navigation bar follow the app theme.
     // We set it transparent so the frosted bottom bar shows through, with light
     // or dark icons matching the current color scheme.
-    val isDarkTheme = !MaterialTheme.colorScheme.surface.luminance().let { it > 0.5f }
+    val isDarkTheme = MaterialTheme.colorScheme.surface.let { color ->
+        val r = color.red * 0.299f
+        val g = color.green * 0.587f
+        val b = color.blue * 0.114f
+        (r + g + b) < 0.5f
+    }
     SideEffect {
         val window = (view.context as? ComponentActivity)?.window ?: return@SideEffect
         WindowCompat.setDecorFitsSystemWindows(window, false)
