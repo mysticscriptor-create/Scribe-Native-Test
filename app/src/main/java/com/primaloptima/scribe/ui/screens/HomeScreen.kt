@@ -471,7 +471,11 @@ fun HomeScreen(
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = Color.Transparent
                     ),
-                    modifier = Modifier.frostedBar(hazeState),
+                    windowInsets = WindowInsets(0.dp),
+                    modifier = Modifier
+                        .frostedBar(hazeState)
+                        .height(48.dp)
+                        .statusBarsPadding(),
                     title = {
                         if (isSearching) {
                             OutlinedTextField(
@@ -588,10 +592,11 @@ fun HomeScreen(
                 NavigationBar(
                     containerColor = Color.Transparent,
                     tonalElevation = 0.dp,
-                    windowInsets = WindowInsets.navigationBars,
+                    windowInsets = WindowInsets(0.dp),
                     modifier = Modifier
                         .frostedBar(hazeState)
-                        .height(56.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
+                        .height(46.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
+                        .padding(bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
                 ) {
                     val accentColor = LocalAccentColor.current
                     val navColors = NavigationBarItemDefaults.colors(
