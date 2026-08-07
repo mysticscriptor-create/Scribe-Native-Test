@@ -467,6 +467,48 @@ fun HomeScreen(
                 // no screen capture needed; already available when the image is loaded.
                 CompositionLocalProvider(LocalOneShotBitmap provides LocalBarBlurBitmap.current) {
                 FrostedBarContent {
+
+                // ── Full-screen search overlay ──────────────────────────────
+                // When search is active, a full overlay slides down from the top
+                // so the user has a proper wide search field instead of a cramped
+                // one inside the narrow top bar.
+                AnimatedVisibility(
+                    visible = isSearching,
+                    enter = slideInVertically(initialOffsetY = { -it }, animationSpec = tween(220)) + fadeIn(tween(220)),
+                    exit = slideOutVertically(targetOffsetY = { -it }, animationSpec = tween(180)) + fadeOut(tween(180))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(top = 8.dp)
+                            .padding(horizontal = 12.dp)
+                            .padding(bottom = 8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("Search titles, notes, folders...") },
+                            singleLine = true,
+                            leadingIcon = {
+                                Icon(Icons.Default.Search, contentDescription = null)
+                            },
+                            trailingIcon = {
+                                IconButton(onClick = {
+                                    if (searchQuery.isNotEmpty()) searchQuery = ""
+                                    else isSearching = false
+                                }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "Clear")
+                                }
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(54.dp)
+                        )
+                    }
+                }
+
                 TopAppBar(
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = Color.Transparent
@@ -474,38 +516,18 @@ fun HomeScreen(
                     windowInsets = WindowInsets(0.dp),
                     modifier = Modifier
                         .frostedBar(hazeState)
-                        .height(48.dp)
-                        .statusBarsPadding(),
+                        .statusBarsPadding()
+                        .height(52.dp),
                     title = {
-                        if (isSearching) {
-                            OutlinedTextField(
-                                value = searchQuery,
-                                onValueChange = { searchQuery = it },
-                                placeholder = { Text("Search full text, titles...") },
-                                singleLine = true,
-                                trailingIcon = {
-                                    IconButton(onClick = {
-                                        if (searchQuery.isNotEmpty()) searchQuery = ""
-                                        else isSearching = false
-                                    }) {
-                                        Icon(Icons.Default.Clear, contentDescription = "Clear")
-                                    }
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(52.dp)
-                            )
-                        } else {
-                            val (titleColor, titleModifier) = rememberAdaptiveTextColor(
-                                fallback = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                "Scribe",
-                                fontWeight = FontWeight.Bold,
-                                color = titleColor,
-                                modifier = titleModifier
-                            )
-                        }
+                        val (titleColor, titleModifier) = rememberAdaptiveTextColor(
+                            fallback = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            "Scribe",
+                            fontWeight = FontWeight.Bold,
+                            color = titleColor,
+                            modifier = titleModifier
+                        )
                     },
                     navigationIcon = {
                         IconButton(onClick = {
@@ -523,12 +545,10 @@ fun HomeScreen(
                         }
                     },
                     actions = {
-                        if (!isSearching) {
-                            IconButton(onClick = { isSearching = true }) {
-                                Icon(Icons.Default.Search, contentDescription = "Search")
-                            }
+                        IconButton(onClick = { isSearching = true }) {
+                            Icon(Icons.Default.Search, contentDescription = "Search")
                         }
-                        if (selectedNavTab == 1 && !isSearching) {
+                        if (selectedNavTab == 1) {
                             IconButton(onClick = { isGridMode = !isGridMode }) {
                                 Icon(
                                     if (isGridMode) Icons.Default.ViewList else Icons.Default.GridView,
@@ -595,8 +615,8 @@ fun HomeScreen(
                     windowInsets = WindowInsets(0.dp),
                     modifier = Modifier
                         .frostedBar(hazeState)
-                        .height(46.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
-                        .padding(bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
+                        .navigationBarsPadding()
+                        .height(58.dp)
                 ) {
                     val accentColor = LocalAccentColor.current
                     val navColors = NavigationBarItemDefaults.colors(
