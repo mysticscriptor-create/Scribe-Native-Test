@@ -58,6 +58,7 @@ import com.primaloptima.scribe.ui.theme.FrostedDialog
 import com.primaloptima.scribe.ui.theme.frostedContainerColor
 import com.primaloptima.scribe.ui.theme.LocalAppTheme
 import com.primaloptima.scribe.ui.theme.ScribeColorScheme
+import com.primaloptima.scribe.ui.theme.parseComposeColor
 import com.primaloptima.scribe.util.BitmapBlur
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
