@@ -1,7 +1,13 @@
 package com.primaloptima.scribe.util.model
 
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.Stable
+import kotlinx.serialization.Serializable
+
 // ── Shortcut ─────────────────────────────────────────────────────────────────
 
+@Immutable
+@Serializable
 data class ShortcutAction(
     val id: String,
     val label: String,
@@ -14,22 +20,21 @@ data class ShortcutAction(
 
 // ── Pinned item ───────────────────────────────────────────────────────────────
 
+@Immutable
+@Serializable
 data class PinnedItem(
     /** "top" | "bottom" */
     val slot: String,
     val noteId: String
 )
 
-// ── Writing streak ────────────────────────────────────────────────────────────
-
-data class StreakData(
-    val currentStreak: Int = 0,
-    val longestStreak: Int = 0,
-    val lastWriteDate: String? = null
-)
-
 // ── Floating window ───────────────────────────────────────────────────────────
 
+// @Stable (not @Immutable): FloatingWindow has var fields (x, y, width, height,
+// zOrder, collapsed) mutated during drag/resize. @Stable is the correct promise:
+// "mutations will be reflected through Compose state channels."
+@Stable
+@Serializable
 data class FloatingWindow(
     val id: String,
     val noteId: String,
@@ -43,6 +48,8 @@ data class FloatingWindow(
 
 // ── External root ─────────────────────────────────────────────────────────────
 
+@Immutable
+@Serializable
 data class ExternalRoot(
     val uri: String,
     val name: String
@@ -50,6 +57,7 @@ data class ExternalRoot(
 
 // ── Outline entry ─────────────────────────────────────────────────────────────
 
+@Immutable
 data class OutlineEntry(
     val level: Int,   // 1–4
     val text: String,
@@ -59,6 +67,8 @@ data class OutlineEntry(
 
 // ── App theme ─────────────────────────────────────────────────────────────────
 
+@Immutable
+@Serializable
 data class ThemeColors(
     val background: String,
     val surface: String,
@@ -71,6 +81,13 @@ data class ThemeColors(
     val toolbarText: String
 )
 
+// @Stable (not @Immutable): AppTheme instances are replaced wholesale via copy()
+// in ThemeEditScreen — no field is mutated in-place, so the contract holds.
+// We use @Stable rather than @Immutable because AppTheme instances are reconstructed
+// frequently during editing; @Stable lets Compose diff by equals() and skip
+// composables that receive an unchanged theme reference.
+@Stable
+@Serializable
 data class AppTheme(
     val id: String,
     val name: String,
@@ -117,6 +134,7 @@ data class AppTheme(
 
 // ── SAF scan result ───────────────────────────────────────────────────────────
 
+@Immutable
 data class SafFile(
     val uri: String,
     val name: String,
@@ -124,17 +142,23 @@ data class SafFile(
     val folderPath: String
 )
 
+@Immutable
 data class SafFolder(
     val uri: String,
     val relativePath: String
 )
 
+@Immutable
 data class SafCover(
     val uri: String,
     val folderPath: String,
     val ext: String
 )
 
+// Note: SafScanResult contains List<T> fields. @Immutable is correct here because
+// these lists are populated once during a SAF scan and never mutated afterward.
+// The List<T> stability issue for composable parameters is handled by stability_config.conf.
+@Immutable
 data class SafScanResult(
     val files: List<SafFile> = emptyList(),
     val folders: List<SafFolder> = emptyList(),
@@ -143,6 +167,7 @@ data class SafScanResult(
 
 // ── History snapshot (SharedPreferences-backed legacy history) ────────────────
 
+@Immutable
 data class HistorySnapshot(
     val content: String,
     val savedAt: Long

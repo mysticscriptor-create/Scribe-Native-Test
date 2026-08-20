@@ -3,10 +3,10 @@ package com.primaloptima.scribe.ui.screens
 import android.os.Build
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -17,7 +17,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -35,68 +38,63 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.allowHardware
 import com.airbnb.lottie.compose.*
-import com.primaloptima.scribe.ScribeApp
 import com.primaloptima.scribe.data.Book
 import com.primaloptima.scribe.data.Note
+import com.primaloptima.scribe.ui.components.*
 import com.primaloptima.scribe.ui.theme.*
-import com.primaloptima.scribe.viewmodel.HomeViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.primaloptima.scribe.viewmodel.DashboardViewModel
 import java.text.SimpleDateFormat
 import java.util.*
-import androidx.compose.foundation.basicMarquee
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 @Composable
 fun DashboardTabContent(
-    vm: HomeViewModel,
+    vm: DashboardViewModel,
     allBooks: List<Book>,
+    bookWordCounts: Map<String, Int>,
     onOpenNote: (noteId: String, bookId: String) -> Unit,
     onOpenBook: (Book) -> Unit,
     onGoToStats: () -> Unit,
     onGoToBooks: () -> Unit,
     onOpenSheets: () -> Unit
 ) {
-    val context = LocalContext.current
-    val prefs = remember { (context.applicationContext as ScribeApp).prefs }
-
-    val ongoingBookId by vm.ongoingProjectBookId.collectAsState()
-    val chapters      by vm.ongoingProjectChapters.collectAsState()
-    val projectAllNotes by vm.ongoingProjectAllNotes.collectAsState()
-    val currentStreak by vm.currentStreak.collectAsState()
+    // Fix 7: collectAsStateWithLifecycle() unsubscribes when the UI is not visible,
+    // reducing DB→Flow→UI cycles while the app is in the background.
+    // Pairs correctly with SharingStarted.WhileSubscribed(5000) in the ViewModel.
+    val ongoingBookId   by vm.ongoingProjectBookId.collectAsStateWithLifecycle()
+    val chapters        by vm.ongoingProjectChapters.collectAsStateWithLifecycle()
+    val currentStreak   by vm.currentStreak.collectAsStateWithLifecycle()
+    val todayWords      by vm.todayWords.collectAsStateWithLifecycle()
+    val dailyGoalPref   by vm.dailyGoal.collectAsStateWithLifecycle()
+    val bookGoal        by vm.currentBookGoal.collectAsStateWithLifecycle()
+    val weekData        by vm.weeklyWordData.collectAsStateWithLifecycle()
 
     val ongoingBook = remember(ongoingBookId, allBooks) {
         ongoingBookId?.let { id -> allBooks.firstOrNull { it.id == id } }
     }
 
-    // Total word count across all notes in the ongoing project
-    val totalProjectWords = remember(projectAllNotes) {
-        projectAllNotes.sumOf { it.content.split("\\s+".toRegex()).count { w -> w.isNotBlank() } }
+    // Phase 3: use bookWordCounts (SQL SUM) instead of ongoingProjectAllNotes.sumOf
+    val totalProjectWords = remember(ongoingBookId, bookWordCounts) {
+        ongoingBookId?.let { bookWordCounts[it] } ?: 0
     }
 
-    val dailyGoal = prefs.dailyGoal
-    val todayStr  = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) }
-    val todayWords = remember(todayStr) { prefs.getTodayWords(todayStr) }
+    val dailyGoal   = if (ongoingBookId != null) bookGoal.dailyWords else dailyGoalPref
+    val totalTarget = if (ongoingBookId != null) bookGoal.totalTarget else 120_000
 
-    // 7-day history for the week bar chart (oldest → newest)
-    val weekData = remember {
-        val fmt    = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-        val dayFmt = SimpleDateFormat("EEE", Locale.US)
-        (6 downTo 0).map { daysAgo ->
-            val cal     = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -daysAgo) }
-            val dateStr = fmt.format(cal.time)
-            val label   = dayFmt.format(cal.time).take(1)
-            Pair(label, prefs.getTodayWords(dateStr))
-        }
-    }
+    var showBookPicker  by remember { mutableStateOf(false) }
+    var showGoalDialog  by remember { mutableStateOf(false) }
 
-    var showBookPicker by remember { mutableStateOf(false) }
-
-    val hazeState   = LocalHazeState.current
     val accentColor = LocalAccentColor.current
+
+    // Fix 3: LaunchedEffect(Unit) removed — weeklyWordData, todayWords, and
+    // currentStreak is a live StateFlow in DashboardViewModel that updates
+    // automatically whenever writing_log changes. No manual load on screen entry.
 
     CompositionLocalProvider(LocalOneShotBitmap provides LocalBarBlurBitmap.current) {
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            modifier       = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 24.dp)
         ) {
 
@@ -105,22 +103,21 @@ fun DashboardTabContent(
                 DashboardGreeting(streak = currentStreak, accentColor = accentColor)
             }
 
-            // ── Current Project card (or empty state) ─────────────────────────
+            // ── Current Project card ──────────────────────────────────────────
             item {
                 Spacer(modifier = Modifier.height(10.dp))
                 if (ongoingBook == null) {
                     NoProjectCard(
                         accentColor  = accentColor,
-                        hazeState    = hazeState,
                         onSetProject = { showBookPicker = true }
                     )
                 } else {
                     CurrentProjectCard(
-                        book             = ongoingBook,
-                        chapters         = chapters,
-                        totalWords       = totalProjectWords,
-                        accentColor      = accentColor,
-                        hazeState        = hazeState,
+                        book              = ongoingBook,
+                        chapters          = chapters,
+                        totalWords        = totalProjectWords,
+                        totalTarget       = totalTarget,
+                        accentColor       = accentColor,
                         onContinueWriting = {
                             val latest = chapters.firstOrNull()
                             if (latest != null) onOpenNote(latest.id, latest.bookId)
@@ -133,14 +130,12 @@ fun DashboardTabContent(
                 }
             }
 
-            // ── Quick Actions ─────────────────────────────────────────────────
+            // ── Quick Actions (inside card) ───────────────────────────────────
             item {
-                Spacer(modifier = Modifier.height(20.dp))
-                QuickActionsRow(
-                    ongoingBook  = ongoingBook,
+                Spacer(modifier = Modifier.height(14.dp))
+                QuickActionsCard(
                     chapters     = chapters,
                     accentColor  = accentColor,
-                    hazeState    = hazeState,
                     onOpenNote   = onOpenNote,
                     onOpenBook   = { ongoingBook?.let { onOpenBook(it) } },
                     onGoToStats  = onGoToStats,
@@ -149,29 +144,28 @@ fun DashboardTabContent(
                 )
             }
 
-            // ── Writing Progress (unified card) ───────────────────────────────
+            // ── Writing Progress ──────────────────────────────────────────────
             item {
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(14.dp))
                 WritingProgressCard(
-                    todayWords   = todayWords,
-                    dailyGoal    = dailyGoal,
-                    weekData     = weekData,
-                    streak       = currentStreak,
-                    totalWords   = totalProjectWords,
-                    accentColor  = accentColor,
-                    hazeState    = hazeState,
-                    onGoToStats  = onGoToStats
+                    todayWords  = todayWords,
+                    dailyGoal   = dailyGoal,
+                    weekData    = weekData,
+                    streak      = currentStreak,
+                    totalWords  = totalProjectWords,
+                    totalTarget = totalTarget,
+                    accentColor = accentColor,
+                    onGoToStats = { showGoalDialog = true }
                 )
             }
 
             // ── Recent Chapters ───────────────────────────────────────────────
             if (ongoingBook != null && chapters.isNotEmpty()) {
                 item {
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
                     RecentChaptersCard(
                         chapters    = chapters.take(3),
                         accentColor = accentColor,
-                        hazeState   = hazeState,
                         onSeeAll    = { ongoingBook?.let { onOpenBook(it) } },
                         onOpenNote  = onOpenNote
                     )
@@ -194,9 +188,20 @@ fun DashboardTabContent(
             onDismiss = { showBookPicker = false }
         )
     }
+
+    // ── Goal setting bottom sheet ─────────────────────────────────────────────
+    if (showGoalDialog) {
+        GoalSettingSheet(
+            bookId      = ongoingBookId,
+            currentGoal = bookGoal,
+            vm          = vm,
+            accentColor = accentColor,
+            onDismiss   = { showGoalDialog = false }
+        )
+    }
 }
 
-// ── Section 1: Greeting ───────────────────────────────────────────────────────
+// ── Greeting ──────────────────────────────────────────────────────────────────
 
 @Composable
 private fun DashboardGreeting(streak: Int, accentColor: Color) {
@@ -206,7 +211,6 @@ private fun DashboardGreeting(streak: Int, accentColor: Color) {
         hour < 17 -> "Good afternoon"
         else      -> "Good evening"
     }
-    // Rotating subtitles by time of day
     val subtitle = when {
         hour < 12 -> "The blank page is waiting for you."
         hour < 17 -> "Every word shapes your story."
@@ -221,10 +225,9 @@ private fun DashboardGreeting(streak: Int, accentColor: Color) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        // Left: greeting text
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -250,385 +253,320 @@ private fun DashboardGreeting(streak: Int, accentColor: Color) {
             )
         }
 
-        // Right: streak pill (two lines — number + label)
         if (streak > 0) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(accentColor.copy(alpha = 0.15f))
-                    .padding(horizontal = 14.dp, vertical = 8.dp)
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text("🔥", fontSize = 14.sp)
-                        Text(
-                            text       = "$streak ${if (streak == 1) "Day" else "Days"}",
-                            fontSize   = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color      = accentColor
-                        )
-                    }
-                    Text(
-                        text     = "Writing Streak",
-                        fontSize = 10.sp,
-                        color    = accentColor.copy(alpha = 0.65f),
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            }
+            ScribePill(
+                text  = "🔥 $streak ${if (streak == 1) "Day" else "Days"}",
+                color = accentColor
+            )
         }
     }
 }
 
-// ── Section 2a: No Project empty state ───────────────────────────────────────
+// ── No Project empty state ────────────────────────────────────────────────────
 
 @Composable
 private fun NoProjectCard(
     accentColor: Color,
-    hazeState: dev.chrisbanes.haze.HazeState?,
     onSetProject: () -> Unit
 ) {
-    val hasBgImage   = localHasBgImage()
-    val solidSurface = LocalSolidSurface.current
-    val cardShape    = RoundedCornerShape(20.dp)
-
-    // Lottie animation from assets/shelf_empty.json
     val composition by rememberLottieComposition(
         LottieCompositionSpec.Asset("shelf_empty.json")
     )
 
-    ElevatedCard(
-        modifier = Modifier
+    ScribeCard(
+        modifier     = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .frostedCard(hazeState, shape = cardShape),
-        shape  = cardShape,
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = frostedContainerColor(
-                fallback = if (hasBgImage) solidSurface.copy(alpha = 0.85f)
-                           else MaterialTheme.colorScheme.surface
-            )
-        ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
+            .padding(horizontal = 16.dp),
+        cornerRadius = ScribeCardTokens.RadiusLarge,
+        onClick      = null
     ) {
-        FrostedCardContent {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+        Column(
+            modifier                = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 20.dp),
+            horizontalAlignment     = Alignment.CenterHorizontally,
+            verticalArrangement     = Arrangement.spacedBy(10.dp)
+        ) {
+            LottieAnimation(
+                composition = composition,
+                iterations  = LottieConstants.IterateForever,
+                modifier    = Modifier.size(80.dp)
+            )
+            Text(
+                "No ongoing project",
+                fontWeight = FontWeight.Bold,
+                fontSize   = 16.sp,
+                color      = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                "Set a book as your ongoing project to track chapters, word count, and daily progress here.",
+                fontSize  = 13.sp,
+                color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center
+            )
+            Button(
+                onClick = onSetProject,
+                colors  = ButtonDefaults.buttonColors(containerColor = accentColor),
+                shape   = RoundedCornerShape(ScribeCardTokens.RadiusSmall)
             ) {
-                // Lottie animation instead of static icon
-                LottieAnimation(
-                    composition = composition,
-                    iterations  = LottieConstants.IterateForever,
-                    modifier    = Modifier.size(80.dp)
+                Icon(
+                    Icons.Outlined.Bookmark,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
                 )
-                Text(
-                    "No ongoing project",
-                    fontWeight = FontWeight.Bold,
-                    fontSize   = 16.sp,
-                    color      = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    "Set a book as your ongoing project to track chapters, word count, and daily progress here.",
-                    fontSize  = 13.sp,
-                    color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                    textAlign = TextAlign.Center
-                )
-                Button(
-                    onClick = onSetProject,
-                    colors  = ButtonDefaults.buttonColors(containerColor = accentColor),
-                    shape   = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Bookmark,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Set Ongoing Project", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Set Ongoing Project", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
 }
 
-// ── Section 2b: Current Project card ─────────────────────────────────────────
+// ── Current Project card ──────────────────────────────────────────────────────
+
+private val PLACEHOLDER_TAGS = listOf("Dark Fantasy", "Adventure", "Romance")
 
 @Composable
 private fun CurrentProjectCard(
     book: Book,
     chapters: List<Note>,
     totalWords: Int,
+    totalTarget: Int,
     accentColor: Color,
-    hazeState: dev.chrisbanes.haze.HazeState?,
     onContinueWriting: () -> Unit,
     onNewChapter: () -> Unit,
     onOpenBook: () -> Unit
 ) {
-    val hasBgImage   = localHasBgImage()
-    val solidSurface = LocalSolidSurface.current
-    val cardShape    = RoundedCornerShape(20.dp)
-    val context      = LocalContext.current
+    val context          = LocalContext.current
+    val lastChapter      = chapters.firstOrNull()
+    val lastTimestamp    = lastChapter?.let { formatRelativeTime(it.updatedAt) }
+    val currentChapterN  = chapters.indexOfFirst { it.id == lastChapter?.id }
+        .let { if (it >= 0) it + 1 else chapters.size }
+    val chapterCount     = chapters.size
+    val progressFraction = (totalWords.toFloat() / totalTarget).coerceIn(0f, 1f)
 
-    val lastChapter   = chapters.firstOrNull()
-    val lastTimestamp = lastChapter?.let { formatRelativeTime(it.updatedAt) }
-    val chapterCount  = chapters.size
-
-    // Novel progress toward 120k-word milestone
-    val targetGoal       = 120_000
-    val progressFraction = (totalWords.toFloat() / targetGoal).coerceIn(0f, 1f)
-    val animatedProgress by animateFloatAsState(
-        targetValue    = progressFraction,
-        animationSpec  = tween(600, easing = FastOutSlowInEasing),
-        label          = "project-progress"
-    )
-
-    ElevatedCard(
-        modifier = Modifier
+    ScribeCard(
+        modifier     = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .frostedCard(hazeState, shape = cardShape),
-        shape  = cardShape,
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = frostedContainerColor(
-                fallback = if (hasBgImage) solidSurface.copy(alpha = 0.85f)
-                           else MaterialTheme.colorScheme.surface
-            )
-        ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
+            .padding(horizontal = 16.dp),
+        cornerRadius = ScribeCardTokens.RadiusLarge
     ) {
-        FrostedCardContent {
-            Column(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.fillMaxWidth()) {
 
-                // ── Cover + meta row ──────────────────────────────────────────
-                Row(modifier = Modifier.fillMaxWidth()) {
+            // ── Cover + meta ──────────────────────────────────────────────────
+            Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
 
-                    // Cover: flush to card left edge, clips to card corners on left side
-                    Box(
-                        modifier = Modifier
-                            .width(108.dp)
-                            .height(152.dp)
-                            .clip(RoundedCornerShape(topStart = 20.dp, bottomStart = 20.dp))
-                            .clickable { onOpenBook() }
-                    ) {
-                        if (book.coverUri != null) {
-                            AsyncImage(
-                                model = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-                                    ImageRequest.Builder(context)
-                                        .data(book.coverUri)
-                                        .allowHardware(false)
-                                        .build()
-                                } else {
-                                    book.coverUri
-                                },
+                Box(
+                    modifier = Modifier
+                        .width(110.dp)
+                        .heightIn(min = 165.dp)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(
+                            topStart    = ScribeCardTokens.RadiusLarge,
+                            bottomStart = ScribeCardTokens.RadiusLarge
+                        ))
+                        .clickable { onOpenBook() }
+                ) {
+                    if (book.coverUri != null) {
+                        AsyncImage(
+                            model = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                                ImageRequest.Builder(context)
+                                    .data(book.coverUri)
+                                    .allowHardware(false)
+                                    .build()
+                            } else book.coverUri,
+                            contentDescription = null,
+                            contentScale       = ContentScale.Crop,
+                            modifier           = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(accentColor.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Outlined.AutoStories,
                                 contentDescription = null,
-                                contentScale       = ContentScale.Crop,
-                                modifier           = Modifier.fillMaxSize()
+                                modifier = Modifier.size(34.dp),
+                                tint     = accentColor
                             )
-                        } else {
-                            // Placeholder when no cover image
+                        }
+                    }
+                }
+
+                // Right column
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                        ScribeSectionLabel(text = "Current Project")
+                        Text(
+                            text       = book.title,
+                            fontWeight = FontWeight.Bold,
+                            fontSize   = 16.sp,
+                            maxLines   = 1,
+                            overflow   = TextOverflow.Ellipsis,
+                            color      = MaterialTheme.colorScheme.onSurface,
+                            modifier   = Modifier.basicMarquee()
+                        )
+                    }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.basicMarquee()
+                    ) {
+                        PLACEHOLDER_TAGS.forEach { tag ->
                             Box(
                                 modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(accentColor.copy(alpha = 0.12f)),
-                                contentAlignment = Alignment.Center
+                                    .clip(RoundedCornerShape(50))
+                                    .background(accentColor.copy(alpha = 0.09f))
+                                    .border(0.5.dp, accentColor.copy(alpha = 0.18f), RoundedCornerShape(50))
+                                    .padding(horizontal = 8.dp, vertical = 3.dp)
                             ) {
-                                Icon(
-                                    Icons.Outlined.Book,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(34.dp),
-                                    tint     = accentColor
+                                Text(
+                                    text       = tag,
+                                    fontSize   = 11.sp,
+                                    lineHeight = 11.sp,
+                                    color      = accentColor.copy(alpha = 0.85f),
+                                    fontWeight = FontWeight.Medium
                                 )
                             }
                         }
                     }
+                    Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                Icons.Outlined.TextSnippet,
+                                null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                            )
+                            Text(
+                                "${formatWordCount(totalWords)} / ${formatWordCount(totalTarget)} words",
+                                fontSize   = 15.sp,
+                                lineHeight = 15.sp,
+                                color      = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                                maxLines   = 1,
+                                overflow   = TextOverflow.Ellipsis
+                            )
+                        }
+                        Row(
+                            verticalAlignment     = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            ScribeProgressBar(
+                                progress = progressFraction,
+                                modifier = Modifier.weight(1f).height(6.dp)
+                            )
+                            Text(
+                                "${(progressFraction * 100).toInt()}%",
+                                fontSize   = 13.sp,
+                                lineHeight = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color      = accentColor
+                            )
+                        }
+                    }
 
-                    // Right column: all metadata
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(152.dp)
-                            .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 12.dp),
-                        verticalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        // Top block
-                        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                            // "CURRENT PROJECT" overline
-                            Text(
-                                text          = "CURRENT PROJECT",
-                                fontSize      = 10.sp,
-                                fontWeight    = FontWeight.SemiBold,
-                                letterSpacing = 1.5.sp,
-                                color         = accentColor
-                            )
-                            // Book title
-                            Text(
-                                text       = book.title,
-                                fontWeight = FontWeight.Bold,
-                                fontSize   = 17.sp,
-                                maxLines   = 2,
-                                overflow   = TextOverflow.Ellipsis,
-                                color      = MaterialTheme.colorScheme.onSurface
-                            )
-                            // Metadata row: chapters · words
-                            Row(
-                                verticalAlignment      = Alignment.CenterVertically,
-                                horizontalArrangement  = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.MenuBook,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(12.dp),
-                                    tint     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                                )
-                                Text(
-                                    text     = "$chapterCount ${if (chapterCount == 1) "Chapter" else "Chapters"}",
-                                    fontSize = 11.sp,
-                                    color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                                )
-                                Text(
-                                    text     = "·",
-                                    fontSize = 11.sp,
-                                    color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
-                                )
-                                Icon(
-                                    Icons.Default.Edit,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(12.dp),
-                                    tint     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                                )
-                                Text(
-                                    text     = "${formatWordCount(totalWords)} / ${formatWordCount(targetGoal)} words",
-                                    fontSize = 11.sp,
-                                    color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            // Progress bar + percent
+                    Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                        if (chapterCount > 0) {
                             Row(
                                 verticalAlignment     = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                ThinProgressBar(
-                                    progress    = animatedProgress,
-                                    accentColor = accentColor,
-                                    modifier    = Modifier.weight(1f).height(5.dp)
+                                Icon(
+                                    Icons.Outlined.MenuBook,
+                                    null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = accentColor.copy(alpha = 0.70f)
                                 )
                                 Text(
-                                    text       = "${(progressFraction * 100).toInt()}%",
-                                    fontSize   = 10.sp,
+                                    "Ch. $currentChapterN of $chapterCount",
+                                    fontSize   = 15.sp,
+                                    lineHeight = 15.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    color      = accentColor
+                                    color      = accentColor.copy(alpha = 0.85f)
                                 )
                             }
                         }
-
-                        // Bottom block: last edited info
-                        if (lastChapter != null) {
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(
-                                    text       = "Last edited",
-                                    fontSize   = 9.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color      = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                        if (lastChapter != null && lastTimestamp != null) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Schedule,
+                                    null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                                 )
-                                Row(
-                                    verticalAlignment     = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.Article,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(11.dp),
-                                        tint     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                                    )
-                                    Text(
-                                        text     = lastChapter.name,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
                                 Text(
-                                    text     = lastTimestamp ?: "",
-                                    fontSize = 10.sp,
-                                    color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                                    text       = "${lastChapter.name}  ·  $lastTimestamp",
+                                    fontSize   = 15.sp,
+                                    lineHeight = 15.sp,
+                                    color      = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f),
+                                    maxLines   = 1,
+                                    overflow   = TextOverflow.Ellipsis
                                 )
                             }
                         }
                     }
                 }
+            }
 
-                // ── Action buttons ────────────────────────────────────────────
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f)
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+            // ── Action buttons ────────────────────────────────────────────────
+            ScribeCardDivider()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick  = onContinueWriting,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors   = ButtonDefaults.buttonColors(containerColor = accentColor),
+                    shape    = RoundedCornerShape(ScribeCardTokens.RadiusSmall),
+                    enabled  = chapters.isNotEmpty()
                 ) {
-                    Button(
-                        onClick  = onContinueWriting,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp),
-                        colors   = ButtonDefaults.buttonColors(containerColor = accentColor),
-                        shape    = RoundedCornerShape(12.dp),
-                        enabled  = chapters.isNotEmpty()
-                    ) {
-                        Icon(
-                            Icons.Default.Edit,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text       = if (chapters.isEmpty()) "No chapters yet" else "Continue Writing",
-                            fontSize   = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines   = 1
-                        )
-                    }
-                    OutlinedButton(
-                        onClick  = onNewChapter,
-                        modifier = Modifier.height(44.dp),
-                        shape    = RoundedCornerShape(12.dp),
-                        border   = BorderStroke(1.dp, accentColor.copy(alpha = 0.5f))
-                    ) {
-                        Icon(
-                            Icons.Default.Add,
-                            contentDescription = "New Chapter",
-                            modifier = Modifier.size(16.dp),
-                            tint     = accentColor
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("New", fontSize = 14.sp, color = accentColor, fontWeight = FontWeight.SemiBold)
-                    }
+                    Icon(Icons.Outlined.Edit, null, modifier = Modifier.size(15.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        if (chapters.isEmpty()) "No chapters yet" else "Continue Writing",
+                        fontSize   = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines   = 1
+                    )
+                }
+                OutlinedButton(
+                    onClick  = onNewChapter,
+                    modifier = Modifier.height(42.dp),
+                    shape    = RoundedCornerShape(ScribeCardTokens.RadiusSmall),
+                    border   = BorderStroke(1.dp, accentColor.copy(alpha = 0.5f))
+                ) {
+                    Icon(Icons.Default.Add, "New Chapter",
+                        modifier = Modifier.size(15.dp), tint = accentColor)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("New", fontSize = 13.sp, color = accentColor,
+                        fontWeight = FontWeight.SemiBold)
                 }
             }
         }
     }
 }
 
-// ── Section 3: Quick Actions row ──────────────────────────────────────────────
+// ── Quick Actions card ────────────────────────────────────────────────────────
 
 @Composable
-private fun QuickActionsRow(
-    ongoingBook: Book?,
+private fun QuickActionsCard(
     chapters: List<Note>,
     accentColor: Color,
-    hazeState: dev.chrisbanes.haze.HazeState?,
     onOpenNote: (noteId: String, bookId: String) -> Unit,
     onOpenBook: () -> Unit,
     onGoToStats: () -> Unit,
@@ -636,631 +574,695 @@ private fun QuickActionsRow(
     onGoToBooks: () -> Unit
 ) {
     val actions = listOf(
-        Triple(Icons.Default.Edit,               "Write",      {
+        Triple(Icons.Outlined.Edit,               "Write",      {
             val latest = chapters.firstOrNull()
             if (latest != null) onOpenNote(latest.id, latest.bookId) else onGoToBooks()
         }),
-        Triple(Icons.Default.FormatListBulleted, "Outline",    { onOpenBook() }),
-        Triple(Icons.Default.People,             "Characters", { onOpenBook() }),
-        Triple(Icons.Default.Public,             "World",      { onOpenSheets() }),
-        Triple(Icons.Default.BarChart,           "Stats",      { onGoToStats() })
+        Triple(Icons.Outlined.AccountTree,        "Outline",    { onOpenBook() }),
+        Triple(Icons.Outlined.People,             "Characters", { onOpenBook() }),
+        Triple(Icons.Outlined.Explore,            "World",      { onOpenSheets() }),
+        Triple(Icons.Outlined.BarChart,           "Stats",      { onGoToStats() })
     )
 
-    val hasBgImage   = localHasBgImage()
-    val solidSurface = LocalSolidSurface.current
-    val cardShape    = RoundedCornerShape(16.dp)
-
-    val (labelColor, _) = rememberAdaptiveTextColor(
-        fallback = MaterialTheme.colorScheme.onSurface
-    )
-
-    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-        // Section header with "See All" link
+    ScribeContentCard(
+        title    = "Quick Actions",
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+    ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment     = Alignment.CenterVertically
-        ) {
-            Text(
-                text          = "Quick Actions",
-                fontSize      = 13.sp,
-                fontWeight    = FontWeight.SemiBold,
-                letterSpacing = 0.5.sp,
-                color         = labelColor.copy(alpha = 0.6f)
-            )
-            Text(
-                text       = "See All",
-                fontSize   = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                color      = accentColor,
-                modifier   = Modifier.clickable { onGoToBooks() }
-            )
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Tiles row
-        Row(
-            modifier              = Modifier.fillMaxWidth(),
+            modifier              = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             actions.forEachIndexed { index, (icon, label, action) ->
-                val isWrite = index == 0
-                ElevatedCard(
-                    modifier = Modifier
+                UniformActionTile(
+                    icon        = icon,
+                    label       = label,
+                    onClick     = action,
+                    accentColor = accentColor,
+                    isFirst     = index == 0,
+                    modifier    = Modifier
                         .weight(1f)
                         .aspectRatio(0.85f)
-                        .then(
-                            if (isWrite) Modifier
-                            else Modifier.frostedCard(hazeState, shape = cardShape)
-                        )
-                        .clickable { action() },
-                    shape  = cardShape,
-                    colors = CardDefaults.elevatedCardColors(
-                        containerColor = if (isWrite) accentColor
-                        else frostedContainerColor(
-                            fallback = if (hasBgImage) solidSurface.copy(alpha = 0.82f)
-                                       else MaterialTheme.colorScheme.surface
-                        )
-                    ),
-                    elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
-                ) {
-                    if (isWrite) {
-                        Column(
-                            modifier              = Modifier.fillMaxSize(),
-                            horizontalAlignment   = Alignment.CenterHorizontally,
-                            verticalArrangement   = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector        = icon,
-                                contentDescription = label,
-                                modifier           = Modifier.size(24.dp),
-                                tint               = Color.White
-                            )
-                            Spacer(modifier = Modifier.height(5.dp))
-                            Text(
-                                text       = label,
-                                fontSize   = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color      = Color.White,
-                                maxLines   = 1
-                            )
-                        }
-                    } else {
-                        FrostedCardContent {
-                            Column(
-                                modifier              = Modifier.fillMaxSize(),
-                                horizontalAlignment   = Alignment.CenterHorizontally,
-                                verticalArrangement   = Arrangement.Center
-                            ) {
-                                Icon(
-                                    imageVector        = icon,
-                                    contentDescription = label,
-                                    modifier           = Modifier.size(24.dp),
-                                    tint               = accentColor
-                                )
-                                Spacer(modifier = Modifier.height(5.dp))
-                                Text(
-                                    text       = label,
-                                    fontSize   = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color      = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
-                                    maxLines   = 1
-                                )
-                            }
-                        }
-                    }
-                }
+                )
             }
         }
     }
 }
 
-// ── Section 4: Writing Progress — unified card ────────────────────────────────
+@Composable
+private fun UniformActionTile(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    accentColor: Color,
+    isFirst: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val hazeState    = LocalHazeState.current
+    val hasBgImage   = localHasBgImage()
+    val solidSurface = LocalSolidSurface.current
+    val shape        = RoundedCornerShape(ScribeCardTokens.RadiusSmall)
+
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue   = if (isPressed) 0.94f else 1f,
+        animationSpec = tween(100, easing = FastOutSlowInEasing),
+        label         = "tile-press"
+    )
+
+    val bgColor = if (isFirst)
+        accentColor.copy(alpha = 0.14f)
+    else
+        frostedContainerColor(
+            fallback = if (hasBgImage) solidSurface.copy(alpha = 0.70f)
+                       else MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+        )
+
+    Box(
+        modifier = modifier
+            .scale(scale)
+            .clip(shape)
+            .background(bgColor)
+            .border(
+                width = 0.6.dp,
+                color = if (isFirst) accentColor.copy(alpha = 0.25f)
+                        else MaterialTheme.colorScheme.outline.copy(alpha = 0.12f),
+                shape = shape
+            )
+            .clickable(interactionSource = interactionSource, indication = null) { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier            = Modifier.padding(6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector        = icon,
+                contentDescription = label,
+                modifier           = Modifier.size(20.dp),
+                tint               = if (isFirst) accentColor else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+            )
+            Spacer(modifier = Modifier.height(5.dp))
+            Text(
+                text       = label,
+                fontSize   = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                color      = if (isFirst) accentColor else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.60f),
+                maxLines   = 1
+            )
+        }
+    }
+}
+
+// ── Writing Progress card ─────────────────────────────────────────────────────
 
 @Composable
 private fun WritingProgressCard(
     todayWords: Int,
     dailyGoal: Int,
-    weekData: List<Pair<String, Int>>,
+    weekData: List<Triple<String, Int, Boolean>>,
     streak: Int,
     totalWords: Int,
+    totalTarget: Int,
     accentColor: Color,
-    hazeState: dev.chrisbanes.haze.HazeState?,
     onGoToStats: () -> Unit
 ) {
-    val hasBgImage   = localHasBgImage()
-    val solidSurface = LocalSolidSurface.current
-    val cardShape    = RoundedCornerShape(20.dp)
-    val onSurface    = MaterialTheme.colorScheme.onSurface
-    val outlineColor = MaterialTheme.colorScheme.outline
+    val weekTotal     = weekData.sumOf { it.second }
+    val weekGoal      = dailyGoal * 7
+    val cal           = Calendar.getInstance()
+    val daysInMonth   = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
+    val monthGoal     = dailyGoal * daysInMonth
+    val monthWritten  = (weekTotal * (daysInMonth / 7f)).toInt()
+    val monthProgress = if (monthGoal > 0) (monthWritten.toFloat() / monthGoal).coerceIn(0f, 1f) else 0f
 
-    // Derived stats
-    val weekTotal      = weekData.sumOf { it.second }
-    val weekGoal       = dailyGoal * 7
-    val cal            = Calendar.getInstance()
-    val daysInMonth    = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
-    val monthGoal      = dailyGoal * daysInMonth
-    val monthWritten   = (weekTotal * (daysInMonth / 7f)).toInt()
-    val monthProgress  = if (monthGoal > 0)
-        (monthWritten.toFloat() / monthGoal).coerceIn(0f, 1f) else 0f
-    val animatedMonthProgress by animateFloatAsState(
-        targetValue   = monthProgress,
-        animationSpec = tween(700, easing = FastOutSlowInEasing),
-        label         = "month-progress"
-    )
-
-    // Next milestone
     val milestones    = listOf(1_000, 5_000, 10_000, 25_000, 50_000, 75_000, 100_000, 120_000)
     val nextMilestone = milestones.firstOrNull { it > totalWords } ?: (totalWords + 10_000)
     val wordsToGo     = nextMilestone - totalWords
 
-    // Streak dot indicators from weekData
-    val streakDots = weekData.map { (label, count) -> Pair(label, count > 0) }
+    val streakDots    = weekData.map { (label, count, _) -> Pair(label, count > 0) }
+    val goalMet       = dailyGoal > 0 && todayWords >= dailyGoal
+    val onSurface     = MaterialTheme.colorScheme.onSurface
+    val outline       = MaterialTheme.colorScheme.outline
 
-    // Today goal met?
-    val goalMet = dailyGoal > 0 && todayWords >= dailyGoal
-
-    ElevatedCard(
-        modifier = Modifier
+    ScribeContentCard(
+        title        = "Your Progress",
+        modifier     = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .frostedCard(hazeState, shape = cardShape),
-        shape  = cardShape,
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = frostedContainerColor(
-                fallback = if (hasBgImage) solidSurface.copy(alpha = 0.85f)
-                           else MaterialTheme.colorScheme.surface
-            )
-        ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
+            .padding(horizontal = 16.dp),
+        actionLabel  = "Set Goal ›",
+        onAction     = onGoToStats
     ) {
-        FrostedCardContent {
-            Column(modifier = Modifier.fillMaxWidth()) {
+        // ── Three stat columns ────────────────────────────────────────────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            ScribeStatColumn(
+                modifier  = Modifier.weight(1f),
+                label     = "Today",
+                value     = formatWordCount(todayWords),
+                subLabel  = "/ ${formatWordCount(dailyGoal)} words",
+                icon      = Icons.Outlined.Edit,
+                badge     = if (goalMet) "Goal reached! 🎉" else null
+            )
 
-                // ── Card header ───────────────────────────────────────────────
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment     = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text       = "Your Progress",
-                        fontSize   = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color      = onSurface
-                    )
-                    Text(
-                        text       = "Set Goal ›",
-                        fontSize   = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color      = accentColor,
-                        modifier   = Modifier.clickable { onGoToStats() }
-                    )
-                }
-                HorizontalDivider(color = outlineColor.copy(alpha = 0.1f))
+            ScribeVerticalDivider(modifier = Modifier.align(Alignment.CenterVertically))
 
-                // ── Three stat columns ────────────────────────────────────────
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 14.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    // Column A: Today
-                    Column(
-                        modifier            = Modifier.weight(1f),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
-                        // Icon in accent circle
-                        Box(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(CircleShape)
-                                .background(accentColor.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Default.Edit,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                                tint     = accentColor
-                            )
-                        }
-                        Text(
-                            text     = "Today",
-                            fontSize = 10.sp,
-                            color    = onSurface.copy(alpha = 0.5f),
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text       = formatWordCount(todayWords),
-                            fontSize   = 26.sp,
-                            fontWeight = FontWeight.Bold,
-                            color      = onSurface
-                        )
-                        Text(
-                            text     = "/ ${formatWordCount(dailyGoal)} words",
-                            fontSize = 11.sp,
-                            color    = onSurface.copy(alpha = 0.45f)
-                        )
-                        if (goalMet) {
-                            Text(
-                                text       = "Goal reached! 🎉",
-                                fontSize   = 10.sp,
-                                color      = accentColor,
-                                fontWeight = FontWeight.SemiBold
+            ScribeStatColumn(
+                modifier  = Modifier.weight(1f),
+                label     = "Streak",
+                value     = "$streak",
+                subLabel  = "days",
+                icon      = Icons.Outlined.LocalFireDepartment,
+                iconTint  = Color(0xFFFF6B00),
+                extra     = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                        streakDots.forEach { (_, hasWords) ->
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (hasWords) accentColor
+                                        else MaterialTheme.colorScheme.outlineVariant
+                                    )
                             )
                         }
                     }
+                }
+            )
 
-                    // Vertical divider
-                    Box(
+            ScribeVerticalDivider(modifier = Modifier.align(Alignment.CenterVertically))
+
+            ScribeStatColumn(
+                modifier  = Modifier.weight(1f),
+                label     = "Monthly",
+                value     = "${(monthProgress * 100).toInt()}%",
+                subLabel  = "${formatWordCount(monthWritten)} written",
+                icon      = Icons.Outlined.TrackChanges,
+                extra     = {
+                    ScribeProgressBar(
+                        progress = monthProgress,
                         modifier = Modifier
-                            .width(1.dp)
-                            .height(90.dp)
-                            .background(outlineColor.copy(alpha = 0.12f))
-                            .align(Alignment.CenterVertically)
-                    )
-
-                    // Column B: Streak
-                    Column(
-                        modifier            = Modifier.weight(1f),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFFF6B00).copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("🔥", fontSize = 13.sp)
-                        }
-                        Text(
-                            text       = "Streak",
-                            fontSize   = 10.sp,
-                            color      = onSurface.copy(alpha = 0.5f),
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text       = "$streak",
-                            fontSize   = 26.sp,
-                            fontWeight = FontWeight.Bold,
-                            color      = onSurface
-                        )
-                        Text(
-                            text     = "days",
-                            fontSize = 11.sp,
-                            color    = onSurface.copy(alpha = 0.45f)
-                        )
-                        // Day dots: M T W T F S S
-                        StreakDots(streakDots = streakDots, accentColor = accentColor)
-                    }
-
-                    // Vertical divider
-                    Box(
-                        modifier = Modifier
-                            .width(1.dp)
-                            .height(90.dp)
-                            .background(outlineColor.copy(alpha = 0.12f))
-                            .align(Alignment.CenterVertically)
-                    )
-
-                    // Column C: Monthly Goal
-                    Column(
-                        modifier            = Modifier.weight(1f),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(CircleShape)
-                                .background(accentColor.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Default.TrackChanges,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                                tint     = accentColor
-                            )
-                        }
-                        Text(
-                            text       = "Monthly",
-                            fontSize   = 10.sp,
-                            color      = onSurface.copy(alpha = 0.5f),
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text       = "${(monthProgress * 100).toInt()}%",
-                            fontSize   = 26.sp,
-                            fontWeight = FontWeight.Bold,
-                            color      = onSurface
-                        )
-                        Text(
-                            text     = "${formatWordCount(monthWritten)} written",
-                            fontSize = 11.sp,
-                            color    = onSurface.copy(alpha = 0.45f)
-                        )
-                        // Thin progress bar for monthly
-                        ThinProgressBar(
-                            progress    = animatedMonthProgress,
-                            accentColor = accentColor,
-                            modifier    = Modifier
-                                .fillMaxWidth(0.75f)
-                                .height(4.dp)
-                                .padding(top = 2.dp)
-                        )
-                    }
-                }
-
-                HorizontalDivider(color = outlineColor.copy(alpha = 0.1f))
-
-                // ── This Week bar chart ───────────────────────────────────────
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                ) {
-                    Row(
-                        modifier              = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment     = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text       = "This Week",
-                            fontSize   = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color      = onSurface.copy(alpha = 0.6f)
-                        )
-                        Text(
-                            text     = "${formatWordCount(weekTotal)} / ${formatWordCount(weekGoal)} words",
-                            fontSize = 11.sp,
-                            color    = onSurface.copy(alpha = 0.45f)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    MiniWeekBar(
-                        weekData    = weekData,
-                        accentColor = accentColor,
-                        modifier    = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
+                            .fillMaxWidth(0.75f)
+                            .height(4.dp)
+                            .padding(top = 2.dp)
                     )
                 }
+            )
+        }
 
-                HorizontalDivider(color = outlineColor.copy(alpha = 0.1f))
+        ScribeCardDivider()
 
-                // ── Next Milestone row ────────────────────────────────────────
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onGoToStats() }
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment     = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment     = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Star,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                            tint     = onSurface.copy(alpha = 0.5f)
-                        )
-                        Text(
-                            text       = "Next Milestone",
-                            fontSize   = 12.sp,
-                            color      = onSurface.copy(alpha = 0.55f),
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                    Row(
-                        verticalAlignment     = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text       = "${formatWordCount(wordsToGo)} words to ${formatWordCount(nextMilestone)}",
-                            fontSize   = 12.sp,
-                            color      = accentColor,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Icon(
-                            Icons.Default.ChevronRight,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                            tint     = accentColor
-                        )
-                    }
-                }
-
-                // ── Motivational quote (only when 0 words written today) ──────
-                if (todayWords == 0) {
-                    HorizontalDivider(color = outlineColor.copy(alpha = 0.1f))
-                    Text(
-                        text      = "\" A page a day builds a world. \"",
-                        fontSize  = 12.sp,
-                        fontStyle = FontStyle.Italic,
-                        color     = onSurface.copy(alpha = 0.38f),
-                        textAlign = TextAlign.Center,
-                        modifier  = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 10.dp)
-                    )
-                }
+        // ── Premium week bar chart ────────────────────────────────────────────
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp)
+        ) {
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment     = Alignment.CenterVertically
+            ) {
+                Text(
+                    "This Week",
+                    fontSize   = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color      = onSurface.copy(alpha = 0.6f)
+                )
+                Text(
+                    "${formatWordCount(weekTotal)} / ${formatWordCount(weekGoal)} words",
+                    fontSize = 11.sp,
+                    color    = onSurface.copy(alpha = 0.45f)
+                )
             }
+            Spacer(modifier = Modifier.height(10.dp))
+            PremiumWeekBarChart(
+                weekData    = weekData,
+                accentColor = accentColor,
+                modifier    = Modifier.fillMaxWidth().height(80.dp)
+            )
+        }
+
+        ScribeCardDivider()
+
+        // ── Next Milestone ────────────────────────────────────────────────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onGoToStats() }
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(Icons.Outlined.StarBorder, null,
+                    modifier = Modifier.size(14.dp),
+                    tint     = onSurface.copy(alpha = 0.5f))
+                Text(
+                    "Next Milestone",
+                    fontSize   = 12.sp,
+                    color      = onSurface.copy(alpha = 0.55f),
+                    fontWeight = FontWeight.Medium
+                )
+            }
+            Row(
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    "${formatWordCount(wordsToGo)} words to ${formatWordCount(nextMilestone)}",
+                    fontSize   = 12.sp,
+                    color      = accentColor,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Icon(Icons.Default.ChevronRight, null,
+                    modifier = Modifier.size(14.dp), tint = accentColor)
+            }
+        }
+
+        // ── Motivational quote ────────────────────────────────────────────────
+        if (todayWords == 0) {
+            ScribeCardDivider()
+            Text(
+                "\" A page a day builds a world. \"",
+                fontSize  = 12.sp,
+                fontStyle = FontStyle.Italic,
+                color     = onSurface.copy(alpha = 0.38f),
+                textAlign = TextAlign.Center,
+                modifier  = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+            )
         }
     }
 }
 
-// ── Section 5: Recent Chapters card ──────────────────────────────────────────
+// ── Premium Week Bar Chart ────────────────────────────────────────────────────
+
+@Composable
+private fun PremiumWeekBarChart(
+    weekData: List<Triple<String, Int, Boolean>>,
+    accentColor: Color,
+    modifier: Modifier = Modifier
+) {
+    val maxVal      = remember(weekData) { (weekData.maxOfOrNull { it.second } ?: 1).coerceAtLeast(1) }
+    val trackColor  = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f)
+    val labelColor  = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+    val todayLabelColor = accentColor
+
+    val animatedFractions = weekData.mapIndexed { i, (_, count, _) ->
+        val anim by animateFloatAsState(
+            targetValue   = count.toFloat() / maxVal,
+            animationSpec = tween(500 + i * 60, easing = FastOutSlowInEasing),
+            label         = "bar-$i"
+        )
+        anim
+    }
+
+    val labelHeightDp = 16.dp
+
+    BoxWithConstraints(modifier = modifier) {
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val labelHeightPx = with(density) { labelHeightDp.toPx() }
+        val dotSizePx = with(density) { 4.dp.toPx() }
+        val barGapPx  = with(density) { 7.dp.toPx() }
+        val cornerPx  = with(density) { 6.dp.toPx() }
+
+        androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+            val barCount     = weekData.size
+            val chartH       = size.height - labelHeightPx
+            val totalGap     = barGapPx * (barCount - 1)
+            val barW         = (size.width - totalGap) / barCount
+
+            weekData.forEachIndexed { i, (label, _, isToday) ->
+                val left      = i * (barW + barGapPx)
+                val fraction  = animatedFractions[i]
+                val barH      = (fraction * chartH).coerceAtLeast(4f)
+                val top       = chartH - barH
+
+                drawRoundRect(
+                    color        = trackColor,
+                    topLeft      = Offset(left, 0f),
+                    size         = Size(barW, chartH),
+                    cornerRadius = CornerRadius(cornerPx)
+                )
+
+                val barGradient = Brush.verticalGradient(
+                    colors = listOf(
+                        if (isToday) accentColor else accentColor.copy(alpha = 0.75f),
+                        accentColor.copy(alpha = if (isToday) 0.30f else 0.15f)
+                    ),
+                    startY = top,
+                    endY   = chartH
+                )
+                drawRoundRect(
+                    brush        = barGradient,
+                    topLeft      = Offset(left, top),
+                    size         = Size(barW, barH),
+                    cornerRadius = CornerRadius(cornerPx)
+                )
+
+                if (isToday && fraction > 0.01f) {
+                    drawCircle(
+                        color  = accentColor,
+                        radius = dotSizePx,
+                        center = Offset(left + barW / 2f, top - dotSizePx - 2f)
+                    )
+                    drawCircle(
+                        color  = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.6f),
+                        radius = dotSizePx * 0.45f,
+                        center = Offset(left + barW / 2f, top - dotSizePx - 2f)
+                    )
+                }
+
+                drawContext.canvas.nativeCanvas.drawText(
+                    label,
+                    left + barW / 2f,
+                    size.height - labelHeightPx * 0.08f,
+                    android.graphics.Paint().apply {
+                        color       = if (isToday) todayLabelColor.toArgb()
+                                      else labelColor.toArgb()
+                        textSize    = labelHeightPx * 0.68f
+                        textAlign   = android.graphics.Paint.Align.CENTER
+                        isAntiAlias = true
+                        if (isToday) isFakeBoldText = true
+                    }
+                )
+            }
+
+            drawLine(
+                color       = trackColor.copy(alpha = 0.5f),
+                start       = Offset(0f, chartH),
+                end         = Offset(size.width, chartH),
+                strokeWidth = 1f
+            )
+        }
+    }
+}
+
+// ── Recent Chapters card ──────────────────────────────────────────────────────
 
 @Composable
 private fun RecentChaptersCard(
     chapters: List<Note>,
     accentColor: Color,
-    hazeState: dev.chrisbanes.haze.HazeState?,
     onSeeAll: () -> Unit,
     onOpenNote: (noteId: String, bookId: String) -> Unit
 ) {
-    val hasBgImage   = localHasBgImage()
-    val solidSurface = LocalSolidSurface.current
-    val cardShape    = RoundedCornerShape(16.dp)
-    val outlineColor = MaterialTheme.colorScheme.outline
-
-    ElevatedCard(
-        modifier = Modifier
+    ScribeContentCard(
+        title       = "Continue where you left off",
+        modifier    = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .frostedCard(hazeState, shape = cardShape),
-        shape  = cardShape,
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = frostedContainerColor(
-                fallback = if (hasBgImage) solidSurface.copy(alpha = 0.85f)
-                           else MaterialTheme.colorScheme.surface
-            )
-        ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
+            .padding(horizontal = 16.dp),
+        cornerRadius = ScribeCardTokens.RadiusMedium,
+        actionLabel = "See All ›",
+        onAction    = onSeeAll
     ) {
-        FrostedCardContent {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                // ── Header ────────────────────────────────────────────────────
+        chapters.forEachIndexed { index, chapter ->
+            val wordCount = chapter.wordCount
+            val previewLine = remember(chapter.content) {
+                chapter.content.lines()
+                    .firstOrNull { it.isNotBlank() }
+                    ?.trim()?.take(70) ?: ""
+            }
+
+            CompactChapterRow(
+                chapter     = chapter,
+                wordCount   = wordCount,
+                previewLine = previewLine,
+                accentColor = accentColor,
+                showDivider = index < chapters.lastIndex,
+                isMostRecent = index == 0,
+                onClick     = { onOpenNote(chapter.id, chapter.bookId) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompactChapterRow(
+    chapter: Note,
+    wordCount: Int,
+    previewLine: String,
+    accentColor: Color,
+    showDivider: Boolean,
+    isMostRecent: Boolean,
+    onClick: () -> Unit
+) {
+    val onSurface = MaterialTheme.colorScheme.onSurface
+    val outline   = MaterialTheme.colorScheme.outline
+
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(indication = null,
+                    interactionSource = remember { MutableInteractionSource() }) { onClick() }
+                .padding(horizontal = 14.dp, vertical = 9.dp),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(ScribeCardTokens.RadiusTiny))
+                    .background(accentColor.copy(alpha = 0.09f))
+                    .border(0.6.dp, accentColor.copy(alpha = 0.16f),
+                        RoundedCornerShape(ScribeCardTokens.RadiusTiny)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Outlined.EditNote,
+                    contentDescription = null,
+                    modifier = Modifier.size(17.dp),
+                    tint     = accentColor.copy(alpha = 0.80f)
+                )
+            }
+
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(
+                    text       = chapter.name,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize   = 13.sp,
+                    color      = onSurface,
+                    maxLines   = 1,
+                    overflow   = TextOverflow.Ellipsis
+                )
+                Text(
+                    text     = "${formatRelativeTime(chapter.updatedAt)}  ·  $wordCount words",
+                    fontSize = 11.sp,
+                    color    = onSurface.copy(alpha = 0.48f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (previewLine.isNotEmpty()) {
+                    Text(
+                        text      = previewLine,
+                        fontSize  = 11.sp,
+                        color     = onSurface.copy(alpha = 0.45f),
+                        maxLines  = 1,
+                        overflow  = TextOverflow.Ellipsis,
+                        fontStyle = FontStyle.Italic
+                    )
+                }
+            }
+
+            if (isMostRecent) {
+                OutlinedButton(
+                    onClick = onClick,
+                    modifier = Modifier.height(30.dp),
+                    shape    = RoundedCornerShape(ScribeCardTokens.RadiusTiny),
+                    border   = BorderStroke(1.dp, accentColor.copy(alpha = 0.35f)),
+                    contentPadding = PaddingValues(horizontal = 9.dp, vertical = 0.dp)
+                ) {
+                    Text(
+                        "Continue",
+                        fontSize   = 10.sp,
+                        color      = accentColor,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+
+        if (showDivider) {
+            HorizontalDivider(
+                modifier = Modifier.padding(start = 60.dp, end = 14.dp),
+                color    = outline.copy(alpha = 0.07f)
+            )
+        }
+    }
+}
+
+// ── Goal Setting Bottom Sheet ─────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GoalSettingSheet(
+    bookId: String?,
+    currentGoal: com.primaloptima.scribe.util.BookGoal,
+    vm: DashboardViewModel,
+    accentColor: Color,
+    onDismiss: () -> Unit
+) {
+    val sheetState   = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val solidSurface = LocalSolidSurface.current
+
+    var dailyWords   by remember { mutableStateOf(currentGoal.dailyWords.toFloat()) }
+    var totalTarget  by remember { mutableStateOf(currentGoal.totalTarget) }
+
+    val targetOptions = listOf(50_000, 80_000, 100_000, 120_000, 200_000)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+        containerColor   = solidSurface,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 8.dp)
+                    .size(width = 36.dp, height = 4.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f))
+            )
+        }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 36.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
+            Text(
+                "Set Writing Goals",
+                fontWeight = FontWeight.Bold,
+                fontSize   = 19.sp,
+                color      = MaterialTheme.colorScheme.onSurface
+            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    modifier              = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment     = Alignment.CenterVertically
                 ) {
                     Text(
-                        text       = "Continue where you left off",
-                        fontSize   = 13.sp,
+                        "Daily Goal",
+                        fontSize   = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                         color      = MaterialTheme.colorScheme.onSurface
                     )
-                    Text(
-                        text       = "See All ›",
-                        fontSize   = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color      = accentColor,
-                        modifier   = Modifier.clickable { onSeeAll() }
-                    )
-                }
-                HorizontalDivider(color = outlineColor.copy(alpha = 0.12f))
-
-                // ── Chapter rows ──────────────────────────────────────────────
-                chapters.forEachIndexed { index, chapter ->
-                    val wordCount = remember(chapter.content) {
-                        chapter.content.split("\\s+".toRegex()).count { it.isNotBlank() }
-                    }
-                    // First non-blank line of content as preview
-                    val previewLine = remember(chapter.content) {
-                        chapter.content
-                            .lines()
-                            .firstOrNull { it.isNotBlank() }
-                            ?.trim()
-                            ?.take(70)
-                            ?: ""
-                    }
-                    val isFirst = index == 0
-
-                    Row(
+                    Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onOpenNote(chapter.id, chapter.bookId) }
-                            .padding(horizontal = 14.dp, vertical = 11.dp),
-                        verticalAlignment     = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            .clip(RoundedCornerShape(ScribeCardTokens.RadiusTiny))
+                            .background(accentColor.copy(alpha = 0.12f))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
-                        // Icon box
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .border(
-                                    width = 1.dp,
-                                    color = outlineColor.copy(alpha = 0.3f),
-                                    shape = RoundedCornerShape(10.dp)
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Default.Article,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                                tint     = accentColor.copy(alpha = 0.8f)
-                            )
-                        }
-
-                        // Text column
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text       = chapter.name,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize   = 13.sp,
-                                color      = MaterialTheme.colorScheme.onSurface,
-                                maxLines   = 1,
-                                modifier   = Modifier.basicMarquee()
-                            )
-                            Text(
-                                text     = "${formatRelativeTime(chapter.updatedAt)}  ·  $wordCount words",
-                                fontSize = 11.sp,
-                                color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
-                                maxLines = 1
-                            )
-                            // Preview line — first sentence of chapter content
-                            if (previewLine.isNotEmpty()) {
-                                Text(
-                                    text     = previewLine,
-                                    fontSize = 12.sp,
-                                    color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    fontStyle = FontStyle.Italic
-                                )
-                            } else {
-                                Text(
-                                    text      = "No content yet",
-                                    fontSize  = 12.sp,
-                                    color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
-                                    fontStyle = FontStyle.Italic
-                                )
-                            }
-                        }
-
-                        // "Continue" button on the most recent chapter only
-                        if (isFirst) {
-                            OutlinedButton(
-                                onClick  = { onOpenNote(chapter.id, chapter.bookId) },
-                                modifier = Modifier.height(32.dp),
-                                shape    = RoundedCornerShape(8.dp),
-                                border   = BorderStroke(1.dp, accentColor.copy(alpha = 0.4f)),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
-                            ) {
-                                Text(
-                                    text       = "Continue",
-                                    fontSize   = 11.sp,
-                                    color      = accentColor,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-                    }
-
-                    if (index < chapters.lastIndex) {
-                        HorizontalDivider(
-                            modifier = Modifier.padding(start = 64.dp, end = 14.dp),
-                            color    = outlineColor.copy(alpha = 0.08f)
+                        Text(
+                            "${dailyWords.toInt()} words",
+                            fontSize   = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color      = accentColor
                         )
                     }
                 }
+                Slider(
+                    value         = dailyWords,
+                    onValueChange = { dailyWords = it },
+                    valueRange    = 100f..3000f,
+                    steps         = 28,
+                    colors        = SliderDefaults.colors(
+                        thumbColor           = accentColor,
+                        activeTrackColor     = accentColor,
+                        inactiveTrackColor   = accentColor.copy(alpha = 0.20f)
+                    )
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("100", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+                    Text("3,000", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Book Target",
+                    fontSize   = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color      = MaterialTheme.colorScheme.onSurface
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    targetOptions.forEach { option ->
+                        val isSelected = totalTarget == option
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(ScribeCardTokens.RadiusTiny))
+                                .background(
+                                    if (isSelected) accentColor.copy(alpha = 0.14f)
+                                    else MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+                                )
+                                .border(
+                                    1.dp,
+                                    if (isSelected) accentColor.copy(alpha = 0.40f)
+                                    else MaterialTheme.colorScheme.outline.copy(alpha = 0.15f),
+                                    RoundedCornerShape(ScribeCardTokens.RadiusTiny)
+                                )
+                                .clickable { totalTarget = option }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                "${option / 1000}k",
+                                fontSize   = 12.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                color      = if (isSelected) accentColor
+                                             else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Button(
+                onClick = {
+                    val goal = com.primaloptima.scribe.util.BookGoal(
+                        dailyWords    = dailyWords.toInt(),
+                        totalTarget   = totalTarget,
+                        chapterTarget = currentGoal.chapterTarget
+                    )
+                    if (bookId != null) {
+                        vm.saveBookGoal(bookId, goal)
+                    } else {
+                        vm.setDailyGoal(dailyWords.toInt())
+                    }
+                    onDismiss()
+                },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                colors   = ButtonDefaults.buttonColors(containerColor = accentColor),
+                shape    = RoundedCornerShape(ScribeCardTokens.RadiusSmall)
+            ) {
+                Icon(Icons.Default.Check, null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Save Goals", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -1279,6 +1281,7 @@ private fun BookPickerSheet(
 ) {
     val sheetState   = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val solidSurface = LocalSolidSurface.current
+    val context      = LocalContext.current
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1316,24 +1319,19 @@ private fun BookPickerSheet(
 
             if (books.isEmpty()) {
                 Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 32.dp),
+                    modifier         = Modifier.fillMaxWidth().padding(vertical = 32.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        "No books yet. Create a book first.",
-                        color = MaterialTheme.colorScheme.outline
-                    )
+                    Text("No books yet. Create a book first.",
+                        color = MaterialTheme.colorScheme.outline)
                 }
             } else {
-                val context = LocalContext.current
                 books.forEach { book ->
                     val isSelected = book.id == currentOngoingId
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(ScribeCardTokens.RadiusSmall))
                             .background(
                                 if (isSelected) accentColor.copy(alpha = 0.10f)
                                 else Color.Transparent
@@ -1343,7 +1341,6 @@ private fun BookPickerSheet(
                         verticalAlignment     = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // Mini cover
                         Box(
                             modifier = Modifier
                                 .size(width = 36.dp, height = 50.dp)
@@ -1368,35 +1365,24 @@ private fun BookPickerSheet(
                                         .background(accentColor.copy(alpha = 0.15f)),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        Icons.Outlined.Book,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp),
-                                        tint     = accentColor
-                                    )
+                                    Icon(Icons.Outlined.AutoStories, null,
+                                        modifier = Modifier.size(18.dp), tint = accentColor)
                                 }
                             }
                         }
-
                         Text(
-                            text       = book.title,
+                            book.title,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                             fontSize   = 15.sp,
                             color      = if (isSelected) accentColor
                                          else MaterialTheme.colorScheme.onSurface,
                             modifier   = Modifier.weight(1f)
                         )
-
                         if (isSelected) {
-                            Icon(
-                                Icons.Default.Check,
-                                contentDescription = "Current project",
-                                modifier = Modifier.size(18.dp),
-                                tint     = accentColor
-                            )
+                            Icon(Icons.Default.Check, "Current project",
+                                modifier = Modifier.size(18.dp), tint = accentColor)
                         }
                     }
-
                     HorizontalDivider(
                         color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)
                     )
@@ -1406,188 +1392,7 @@ private fun BookPickerSheet(
     }
 }
 
-// ── Primitive: thin animated progress bar ────────────────────────────────────
-
-@Composable
-private fun ThinProgressBar(
-    progress: Float,
-    accentColor: Color,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(50))
-            .background(MaterialTheme.colorScheme.outlineVariant)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(progress.coerceIn(0f, 1f))
-                .fillMaxHeight()
-                .background(accentColor)
-        )
-    }
-}
-
-// ── Primitive: streak day dots ────────────────────────────────────────────────
-
-@Composable
-private fun StreakDots(
-    streakDots: List<Pair<String, Boolean>>,
-    accentColor: Color
-) {
-    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-        streakDots.forEach { (_, hasWords) ->
-            Box(
-                modifier = Modifier
-                    .size(7.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (hasWords) accentColor
-                        else MaterialTheme.colorScheme.outlineVariant
-                    )
-            )
-        }
-    }
-}
-
-// ── Primitive: week bar chart (Canvas) ────────────────────────────────────────
-
-@Composable
-private fun MiniWeekBar(
-    weekData: List<Pair<String, Int>>,
-    accentColor: Color,
-    modifier: Modifier = Modifier
-) {
-    val maxVal      = remember(weekData) { (weekData.maxOfOrNull { it.second } ?: 1).coerceAtLeast(1) }
-    val trackColor  = MaterialTheme.colorScheme.outlineVariant
-    val labelColor  = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-    val animatedBars = weekData.mapIndexed { i, (label, count) ->
-        val anim by animateFloatAsState(
-            targetValue   = count.toFloat() / maxVal,
-            animationSpec = tween(400 + i * 40, easing = FastOutSlowInEasing),
-            label         = "bar-$i"
-        )
-        Triple(label, count, anim)
-    }
-
-    val labelHeightDp = 14.dp
-    BoxWithConstraints(modifier = modifier) {
-        val labelHeightPx = with(androidx.compose.ui.platform.LocalDensity.current) { labelHeightDp.toPx() }
-        androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
-            val barCount     = animatedBars.size
-            val spacing      = size.width * 0.04f
-            val totalSpacing = spacing * (barCount - 1)
-            val barW         = (size.width - totalSpacing) / barCount
-            val chartH       = size.height - labelHeightPx
-            val radius       = barW / 2f
-
-            animatedBars.forEachIndexed { i, (label, _, fraction) ->
-                val left = i * (barW + spacing)
-                val barH = (fraction * chartH).coerceAtLeast(4f)
-                val top  = chartH - barH
-
-                drawRoundRect(
-                    color        = trackColor,
-                    topLeft      = Offset(left, 0f),
-                    size         = Size(barW, chartH),
-                    cornerRadius = CornerRadius(radius)
-                )
-                drawRoundRect(
-                    color        = accentColor,
-                    topLeft      = Offset(left, top),
-                    size         = Size(barW, barH),
-                    cornerRadius = CornerRadius(radius)
-                )
-                drawContext.canvas.nativeCanvas.drawText(
-                    label,
-                    left + barW / 2f,
-                    size.height - labelHeightPx * 0.1f,
-                    android.graphics.Paint().apply {
-                        color     = labelColor.toArgb()
-                        textSize  = labelHeightPx * 0.72f
-                        textAlign = android.graphics.Paint.Align.CENTER
-                        isAntiAlias = true
-                    }
-                )
-            }
-        }
-    }
-}
-
-// ── Primitive: DonutChart (kept for potential use in StatsScreen) ─────────────
-
-@Composable
-private fun DonutChart(
-    progress: Float,
-    centerLabel: String,
-    accentColor: Color,
-    modifier: Modifier = Modifier
-) {
-    val animatedSweep by animateFloatAsState(
-        targetValue   = progress * 360f,
-        animationSpec = tween(600, easing = FastOutSlowInEasing),
-        label         = "donut-sweep"
-    )
-    val trackColor = MaterialTheme.colorScheme.outlineVariant
-    val onSurface  = MaterialTheme.colorScheme.onSurface
-
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
-            val stroke = size.minDimension * 0.14f
-            val inset  = stroke / 2f
-            val oval   = androidx.compose.ui.geometry.Rect(
-                left   = inset, top   = inset,
-                right  = size.width - inset, bottom = size.height - inset
-            )
-            drawArc(
-                color       = trackColor,
-                startAngle  = -90f,
-                sweepAngle  = 360f,
-                useCenter   = false,
-                topLeft     = Offset(oval.left, oval.top),
-                size        = Size(oval.width, oval.height),
-                style       = Stroke(width = stroke, cap = StrokeCap.Round)
-            )
-            if (animatedSweep > 0f) {
-                drawArc(
-                    color       = accentColor,
-                    startAngle  = -90f,
-                    sweepAngle  = animatedSweep,
-                    useCenter   = false,
-                    topLeft     = Offset(oval.left, oval.top),
-                    size        = Size(oval.width, oval.height),
-                    style       = Stroke(width = stroke, cap = StrokeCap.Round)
-                )
-            }
-        }
-        Text(
-            text       = centerLabel,
-            fontSize   = 11.sp,
-            fontWeight = FontWeight.Bold,
-            color      = onSurface,
-            maxLines   = 1
-        )
-    }
-}
-
 // ── Shared helpers ────────────────────────────────────────────────────────────
-
-@Composable
-private fun DashboardSectionLabel(text: String, inline: Boolean = false) {
-    val (color, mod) = rememberAdaptiveTextColor(
-        fallback = MaterialTheme.colorScheme.onSurface
-    )
-    Text(
-        text          = text,
-        fontSize      = 13.sp,
-        fontWeight    = FontWeight.SemiBold,
-        letterSpacing = 0.5.sp,
-        color         = color.copy(alpha = 0.6f),
-        modifier      = Modifier
-            .then(if (inline) Modifier else Modifier.padding(horizontal = 16.dp))
-            .then(mod)
-    )
-}
 
 private fun formatWordCount(count: Int): String = when {
     count >= 1_000 -> "${count / 1_000}k"
@@ -1595,30 +1400,18 @@ private fun formatWordCount(count: Int): String = when {
 }
 
 private fun formatRelativeTime(timestamp: Long): String {
-    val now      = System.currentTimeMillis()
-    val diffMs   = now - timestamp
-    val diffMin  = diffMs / 60_000
+    val now       = System.currentTimeMillis()
+    val diffMs    = now - timestamp
+    val diffMin   = diffMs / 60_000
     val diffHours = diffMs / 3_600_000
     val diffDays  = diffMs / 86_400_000
 
     return when {
         diffMin < 1    -> "Just now"
         diffMin < 60   -> "$diffMin min ago"
-        diffHours < 24 -> {
-            val fmt = SimpleDateFormat("h:mm a", Locale.US)
-            "Today, ${fmt.format(Date(timestamp))}"
-        }
-        diffDays == 1L -> {
-            val fmt = SimpleDateFormat("h:mm a", Locale.US)
-            "Yesterday, ${fmt.format(Date(timestamp))}"
-        }
-        diffDays < 7   -> {
-            val fmt = SimpleDateFormat("EEE, h:mm a", Locale.US)
-            fmt.format(Date(timestamp))
-        }
-        else -> {
-            val fmt = SimpleDateFormat("MMM d", Locale.US)
-            fmt.format(Date(timestamp))
-        }
+        diffHours < 24 -> "Today, ${SimpleDateFormat("h:mm a", Locale.US).format(Date(timestamp))}"
+        diffDays == 1L -> "Yesterday, ${SimpleDateFormat("h:mm a", Locale.US).format(Date(timestamp))}"
+        diffDays < 7   -> SimpleDateFormat("EEE, h:mm a", Locale.US).format(Date(timestamp))
+        else           -> SimpleDateFormat("MMM d", Locale.US).format(Date(timestamp))
     }
 }

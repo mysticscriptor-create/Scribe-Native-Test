@@ -8,13 +8,13 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ShortText
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.livedata.observeAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -27,9 +27,9 @@ import com.primaloptima.scribe.ui.theme.FrostedDialog
 import com.primaloptima.scribe.ui.theme.LocalHazeState
 import com.primaloptima.scribe.ui.theme.LocalOneShotBitmap
 import com.primaloptima.scribe.ui.theme.LocalSolidSurface
-import com.primaloptima.scribe.ui.theme.frostedBar
-import com.primaloptima.scribe.ui.theme.frostedContainerColor
-import com.primaloptima.scribe.ui.theme.frostedFab
+import com.primaloptima.scribe.ui.components.ScribeTopBar
+import com.primaloptima.scribe.ui.components.ScribeBarAction
+import com.primaloptima.scribe.ui.components.ScribeSingleFab
 import com.primaloptima.scribe.util.BitmapBlur
 import com.primaloptima.scribe.util.model.ShortcutAction
 import com.primaloptima.scribe.viewmodel.ShortcutsViewModel
@@ -44,7 +44,7 @@ fun ShortcutsScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val shortcuts by vm.shortcuts.observeAsState(emptyList())
+    val shortcuts by vm.shortcuts.collectAsStateWithLifecycle()
 
     var showEditDialog by remember { mutableStateOf(false) }
     var shortcutToEdit by remember { mutableStateOf<ShortcutAction?>(null) }
@@ -73,40 +73,27 @@ fun ShortcutsScreen(
     Scaffold(
         contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
         topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent
-                ),
-                modifier = Modifier.frostedBar(hazeState),
-                title = { Text("Shortcuts", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = {
+            ScribeTopBar(
+                title             = "Shortcuts",
+                navigationIcon    = Icons.AutoMirrored.Filled.ArrowBack,
+                onNavigationClick = onBack,
+                actions           = listOf(
+                    ScribeBarAction(Icons.Default.Refresh, "Reset") {
                         vm.resetToDefaults()
                         Toast.makeText(context, "Shortcuts reset to defaults", Toast.LENGTH_SHORT).show()
-                    }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Reset")
                     }
-                }
+                )
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
+            ScribeSingleFab(
+                icon = Icons.Default.Add,
+                contentDescription = "New Shortcut",
                 onClick = {
                     shortcutToEdit = null
                     showEditDialog = true
-                },
-                shape = CircleShape,
-                containerColor = frostedContainerColor(fallback = MaterialTheme.colorScheme.primary),
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.frostedFab(LocalHazeState.current)
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "New Shortcut")
-            }
+                }
+            )
         }
     ) { padding ->
         if (shortcuts.isEmpty()) {
@@ -194,7 +181,7 @@ private fun ShortcutRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                Icons.Default.ShortText,
+                Icons.AutoMirrored.Filled.ShortText,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(28.dp)

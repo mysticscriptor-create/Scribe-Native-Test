@@ -31,12 +31,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.primaloptima.scribe.ScribeApp
 import com.primaloptima.scribe.data.NoteVersion
+import com.primaloptima.scribe.viewmodel.EditorViewModel
 import com.primaloptima.scribe.ui.theme.FrostedDialog
 import com.primaloptima.scribe.ui.theme.LocalHazeState
 import com.primaloptima.scribe.ui.theme.LocalOneShotBitmap
-import com.primaloptima.scribe.ui.theme.frostedBar
+import com.primaloptima.scribe.ui.components.ScribeTopBar
 import com.primaloptima.scribe.util.BitmapBlur
 import com.primaloptima.scribe.util.MarkdownUtil
 import dev.chrisbanes.haze.hazeSource
@@ -50,19 +52,32 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(
+    editorVm: EditorViewModel,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val app = context.applicationContext as ScribeApp
 
-    val noteId = remember { app.prefs.activeNoteId ?: "" }
+    // Phase 6-F: read activeNoteId from DataStore instead of prefs snapshot.
+    // collectAsStateWithLifecycle stops collecting when the UI is invisible,
+    // saving resources (replaces collectAsState throughout this screen).
+    val activeNoteIdState by app.dataStore.activeNoteIdFlow.collectAsStateWithLifecycle(initialValue = null)
+    val noteId = activeNoteIdState ?: ""
     var currentNoteContent by remember { mutableStateOf("") }
 
     val versionsFlow = remember(noteId) {
         app.database.noteVersionDao().observeVersions(noteId)
     }
-    val versions by versionsFlow.collectAsState(initial = emptyList())
+    val versions by versionsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+
+    // Tracks whether the DB has responded at least once so we don't flash
+    // "No saved versions" on the initial empty-list emission before the
+    // query returns. Only show the empty state after the first real result.
+    var hasLoaded by remember { mutableStateOf(false) }
+    LaunchedEffect(versions) {
+        if (!hasLoaded) hasLoaded = true
+    }
 
     LaunchedEffect(noteId) {
         if (noteId.isNotBlank()) {
@@ -102,17 +117,10 @@ fun HistoryScreen(
     Scaffold(
         contentWindowInsets = WindowInsets.systemBars,
         topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent
-                ),
-                modifier = Modifier.frostedBar(hazeState),
-                title = { Text("Version History", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                }
+            ScribeTopBar(
+                title             = "Version History",
+                navigationIcon    = Icons.AutoMirrored.Filled.ArrowBack,
+                onNavigationClick = onBack
             )
         }
     ) { padding ->
@@ -123,7 +131,12 @@ fun HistoryScreen(
                     .padding(padding),
                 contentAlignment = Alignment.Center
             ) {
-                Text("No saved versions for this note yet.", color = MaterialTheme.colorScheme.outline)
+                // Show the empty-state message only after the DB has responded.
+                // Before hasLoaded, the list is the initial emptyList() placeholder —
+                // showing the message immediately would flash before any data arrives.
+                if (hasLoaded) {
+                    Text("No saved versions for this note yet.", color = MaterialTheme.colorScheme.outline)
+                }
             }
         } else {
             LazyColumn(
@@ -134,7 +147,7 @@ fun HistoryScreen(
                     .padding(padding)
                     .then(if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier)
             ) {
-                itemsIndexed(versions) { index, ver ->
+                itemsIndexed(versions, key = { _, ver -> ver.timestamp }) { index, ver ->
                     val dateStr = remember(ver.timestamp) {
                         SimpleDateFormat("MMM d, yyyy · h:mm a", Locale.getDefault()).format(Date(ver.timestamp))
                     }
@@ -277,15 +290,17 @@ fun HistoryScreen(
                     Button(
                         onClick = {
                             val ver = selectedVersion!!
-                            scope.launch(Dispatchers.IO) {
-                                val db = app.database
-                                db.noteDao().updateContent(noteId, ver.content, System.currentTimeMillis())
-                                withContext(Dispatchers.Main) {
-                                    Toast.makeText(context, "Version restored successfully", Toast.LENGTH_SHORT).show()
-                                    showConfirmRestoreDialog = false
-                                    selectedVersion = null
-                                    onBack()
-                                }
+                            // Fix (Bug 1): Route restore through EditorViewModel so
+                            // lastWordCount is reset to the restored baseline and a
+                            // corrective delta is written to writing_log atomically.
+                            // Previously this called db.noteDao() directly, bypassing
+                            // the ViewModel entirely and corrupting subsequent deltas.
+                            editorVm.restoreSnapshot(ver.content)
+                            scope.launch(Dispatchers.Main) {
+                                Toast.makeText(context, "Version restored successfully", Toast.LENGTH_SHORT).show()
+                                showConfirmRestoreDialog = false
+                                selectedVersion = null
+                                onBack()
                             }
                         }
                     ) {

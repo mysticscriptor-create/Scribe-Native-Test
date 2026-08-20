@@ -3,10 +3,10 @@ package com.primaloptima.scribe.ui.theme
 import android.app.Activity
 import android.graphics.Bitmap
 import coil3.BitmapImage
-import android.graphics.RenderEffect as AndroidRenderEffect
-import android.graphics.Shader
+
 import android.os.Build
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -41,8 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asComposeRenderEffect
-import androidx.compose.ui.graphics.graphicsLayer
+
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -54,7 +53,8 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.allowHardware
 import com.primaloptima.scribe.util.DefaultThemes
-import com.primaloptima.scribe.util.ThemeDataStoreRepo
+import com.primaloptima.scribe.ScribeApp
+import com.primaloptima.scribe.util.ScribeDataStore
 import com.primaloptima.scribe.util.ThemeManager
 import com.primaloptima.scribe.util.model.AppTheme
 import dev.chrisbanes.haze.HazeState
@@ -628,15 +628,19 @@ fun ScribeComposeTheme(
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
-    val themeManager = remember { ThemeManager(context) }
+    // Use the app-singleton ThemeManager so its in-memory cache (seeded by ScribeApp
+    // and kept up-to-date by ThemeViewModel.save/delete) is always current.
+    // Creating a new ThemeManager here would give an instance whose cache is never
+    // seeded, causing allThemes() to return only built-ins (no backgroundImageUri).
+    val themeManager = remember { (context.applicationContext as ScribeApp).themeManager }
     val resolvedTheme = if (appTheme != null) {
         appTheme
     } else {
-        val repo = remember { ThemeDataStoreRepo(context) }
-        val activeThemeId by repo.activeThemeIdFlow.collectAsState(
+        val dataStore = remember { (context.applicationContext as ScribeApp).dataStore }
+        val activeThemeId by dataStore.activeThemeIdFlow.collectAsState(
             initial = themeManager.activeTheme().id
         )
-        val customThemesJson by repo.customThemesJsonFlow.collectAsState(initial = "[]")
+        val customThemesJson by dataStore.customThemesJsonFlow.collectAsState(initial = "[]")
         remember(activeThemeId, customThemesJson) {
             themeManager.allThemes().firstOrNull { it.id == activeThemeId }
                 ?: DefaultThemes.all.first()
@@ -797,8 +801,14 @@ fun ScribeComposeTheme(
         )
     }
 
-    val duration = 400
-    val animSpec = tween<Color>(durationMillis = duration)
+    // Use snap() on first composition and when the theme ID hasn't actually changed
+    // (e.g. a color tweak inside the same theme triggers recomposition but should not
+    // animate). Only animate when the user deliberately switches to a different theme.
+    var prevThemeId by remember { mutableStateOf<String?>(null) }
+    val isThemeChanging = prevThemeId != null && prevThemeId != resolvedTheme.id
+    SideEffect { prevThemeId = resolvedTheme.id }
+
+    val animSpec = if (isThemeChanging) tween<Color>(durationMillis = 400) else snap()
 
     val animPrimary by animateColorAsState(rawColorScheme.primary, animSpec, label = "primary")
     val animOnPrimary by animateColorAsState(rawColorScheme.onPrimary, animSpec, label = "onPrimary")
@@ -863,7 +873,10 @@ fun ScribeComposeTheme(
         }
     }
 
-    val hazeState = rememberHazeState(blurEnabled = true)
+    // Only activate Haze when there is actually a background image in blurred mode.
+    // blurEnabled = false makes Haze fully dormant — no GPU overhead, no blur passes.
+    // image mode (sharp wallpaper) and color mode (no image) both get blurEnabled = false.
+    val hazeState = rememberHazeState(blurEnabled = hasBgImage && resolvedTheme.bgMode == "blurred")
 
     // ── Pre-compute blur inputs before CompositionLocalProvider ──────────────
     // These vals must live here (not inside the provider's content lambda) because
@@ -912,7 +925,7 @@ fun ScribeComposeTheme(
         key2 = blurIntensity,
         key3 = needsSoftwareBlur
     ) {
-        if (!needsSoftwareBlur || bgUri == null) {
+        if (!needsSoftwareBlur) {
             value = null
             return@produceState
         }
@@ -944,7 +957,7 @@ fun ScribeComposeTheme(
         key1 = bgUri,
         key2 = needsSoftwareImage
     ) {
-        if (!needsSoftwareImage || bgUri == null) {
+        if (!needsSoftwareImage) {
             value = null
             return@produceState
         }
@@ -988,7 +1001,7 @@ fun ScribeComposeTheme(
                     com.primaloptima.scribe.util.BitmapBlur.blurBitmap(softwareImageModel!!, radius = frostedBlurRadius.toInt().coerceIn(1, 25))
 
                 // fallback: load fresh at screen aspect ratio (rare cold-start race)
-                hasBgImage && bgUri != null -> {
+                bgUri != null -> {
                     try {
                         val loader = coil3.ImageLoader(context)
                         val req = coil3.request.ImageRequest.Builder(context)
@@ -1051,19 +1064,15 @@ fun ScribeComposeTheme(
                             contentScale = ContentScale.FillBounds,
                             modifier = Modifier
                                 .fillMaxSize()
+                                // hazeSource registers this image as the layer Haze blurs from.
+                                // On API 31+, hazeEffect on child composables (bars, cards, FABs)
+                                // does all the blurring — the source must be the raw unprocessed
+                                // image. Applying renderEffect here creates an isolated offscreen
+                                // GPU render node that Haze cannot see through, which is why blur
+                                // was broken on API 31+. Pre-API-31 uses a pre-blurred software
+                                // bitmap with blurEnabled = false, so it never needs renderEffect
+                                // here either.
                                 .hazeSource(state = hazeState)
-                                .then(
-                                    if (bgMode == "blurred" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && blurIntensity > 0f) {
-                                        Modifier.graphicsLayer {
-                                            val radiusPx = blurIntensity * density
-                                            if (radiusPx > 0f) {
-                                                renderEffect = AndroidRenderEffect
-                                                    .createBlurEffect(radiusPx, radiusPx, Shader.TileMode.CLAMP)
-                                                    .asComposeRenderEffect()
-                                            }
-                                        }
-                                    } else Modifier
-                                )
                         )
                         // Only apply the colour tint overlay in "blurred" mode.
                         // In "image" mode the user wants the image as-is — no wash.

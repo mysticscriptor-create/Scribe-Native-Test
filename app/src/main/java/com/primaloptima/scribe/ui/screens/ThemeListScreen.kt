@@ -21,7 +21,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.livedata.observeAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,23 +32,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
-import com.google.gson.Gson
-import com.google.gson.GsonBuilder
-import com.primaloptima.scribe.ThemeEditActivity
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.style.TextOverflow
 import com.primaloptima.scribe.ui.theme.FrostedDialog
 import com.primaloptima.scribe.ui.theme.LocalHazeState
 import com.primaloptima.scribe.ui.theme.LocalOneShotBitmap
 import com.primaloptima.scribe.ui.theme.LocalSolidSurface
-import com.primaloptima.scribe.ui.theme.frostedBar
-import com.primaloptima.scribe.ui.theme.frostedContainerColor
-import com.primaloptima.scribe.ui.theme.frostedFab
+import com.primaloptima.scribe.ui.components.ScribeTopBar
+import com.primaloptima.scribe.ui.components.ScribeBarAction
+import com.primaloptima.scribe.ui.components.ScribeSingleFab
 import com.primaloptima.scribe.ui.theme.parseComposeColor
 import com.primaloptima.scribe.ui.theme.FontHelper
 import com.primaloptima.scribe.util.BitmapBlur
 import com.primaloptima.scribe.util.DefaultThemes
 import com.primaloptima.scribe.util.model.AppTheme
+import com.primaloptima.scribe.util.AppJson
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
 import com.primaloptima.scribe.viewmodel.ThemeViewModel
 import dev.chrisbanes.haze.hazeSource
 import java.io.File
@@ -59,11 +59,12 @@ import kotlinx.coroutines.withContext
 @Composable
 fun ThemeListScreen(
     vm: ThemeViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onEditTheme: (themeId: String) -> Unit
 ) {
     val context = LocalContext.current
-    val themes by vm.themes.observeAsState(emptyList())
-    val activeTheme by vm.activeTheme.observeAsState()
+    val themes by vm.themes.collectAsStateWithLifecycle()
+    val activeTheme by vm.activeTheme.collectAsStateWithLifecycle()
 
     var themeToDelete by remember { mutableStateOf<AppTheme?>(null) }
     var showTopMenu by remember { mutableStateOf(false) }
@@ -107,42 +108,32 @@ fun ThemeListScreen(
     Scaffold(
         contentWindowInsets = WindowInsets.systemBars,
         topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent
-                ),
-                modifier = Modifier.frostedBar(hazeState),
-                title = { Text("Themes", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    Box {
-                        IconButton(onClick = { showTopMenu = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "Menu")
-                        }
-                        DropdownMenu(
-                            expanded = showTopMenu,
-                            onDismissRequest = { showTopMenu = false },
-                            containerColor = LocalSolidSurface.current
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Import Theme") },
-                                leadingIcon = { Icon(Icons.Default.FileDownload, contentDescription = null) },
-                                onClick = {
-                                    showTopMenu = false
-                                    importThemeLauncher.launch("*/*")
-                                }
-                            )
-                        }
-                    }
+            Box {
+                ScribeTopBar(
+                    title             = "Themes",
+                    navigationIcon    = Icons.AutoMirrored.Filled.ArrowBack,
+                    onNavigationClick = onBack,
+                    actions           = listOf(
+                        ScribeBarAction(Icons.Default.MoreVert, "Menu") { showTopMenu = true }
+                    )
+                )
+                DropdownMenu(
+                    expanded         = showTopMenu,
+                    onDismissRequest = { showTopMenu = false },
+                    containerColor   = LocalSolidSurface.current
+                ) {
+                    DropdownMenuItem(
+                        text        = { Text("Import Theme") },
+                        leadingIcon = { Icon(Icons.Default.FileDownload, contentDescription = null) },
+                        onClick     = { showTopMenu = false; importThemeLauncher.launch("*/*") }
+                    )
                 }
-            )
+            }
         },
         floatingActionButton = {
-            FloatingActionButton(
+            ScribeSingleFab(
+                icon = Icons.Default.Add,
+                contentDescription = "New Theme",
                 onClick = {
                     val active = activeTheme ?: DefaultThemes.all.first()
                     val newTheme = active.copy(
@@ -152,16 +143,9 @@ fun ThemeListScreen(
                         emoji = "🖊️"
                     )
                     vm.save(newTheme)
-                    context.startActivity(
-                        Intent(context, ThemeEditActivity::class.java)
-                            .putExtra("theme_id", newTheme.id)
-                    )
-                },
-                containerColor = frostedContainerColor(fallback = MaterialTheme.colorScheme.primary),
-                modifier = Modifier.frostedFab(hazeState, shape = androidx.compose.material3.FloatingActionButtonDefaults.shape)
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "New Theme")
-            }
+                    onEditTheme(newTheme.id)
+                }
+            )
         }
     ) { padding ->
         LazyColumn(
@@ -184,12 +168,7 @@ fun ThemeListScreen(
                         vm.setActive(theme.id)
                         Toast.makeText(context, "${theme.name} applied", Toast.LENGTH_SHORT).show()
                     },
-                    onEdit = {
-                        context.startActivity(
-                            Intent(context, ThemeEditActivity::class.java)
-                                .putExtra("theme_id", theme.id)
-                        )
-                    },
+                    onEdit = { onEditTheme(theme.id) },
                     onDuplicate = {
                         vm.duplicate(theme.id)
                         Toast.makeText(context, "Duplicated ${theme.name}", Toast.LENGTH_SHORT).show()
@@ -413,8 +392,7 @@ private fun ThemeCard(
 
 private fun exportThemeJson(context: Context, theme: AppTheme) {
     try {
-        val gson = GsonBuilder().setPrettyPrinting().create()
-        val json = gson.toJson(theme)
+        val json = AppJson.encodeToString(theme)
         val fileName = "${theme.name.lowercase().replace(Regex("[^a-z0-9]"), "_")}_theme.json"
         val dir = File(context.cacheDir, "exported_themes").also { it.mkdirs() }
         val file = File(dir, fileName).also { it.writeText(json) }
@@ -435,7 +413,7 @@ private fun importThemeFromUri(context: Context, uri: Uri, vm: ThemeViewModel) {
         val inputStream = context.contentResolver.openInputStream(uri)
         val json = inputStream?.bufferedReader()?.use { it.readText() }
         if (!json.isNullOrEmpty()) {
-            val imported = Gson().fromJson(json, AppTheme::class.java)
+            val imported = try { AppJson.decodeFromString<AppTheme>(json) } catch (_: Exception) { null }
             if (imported != null && !imported.name.isNullOrBlank()) {
                 val newTheme = imported.copy(
                     id = vm.generateId(),

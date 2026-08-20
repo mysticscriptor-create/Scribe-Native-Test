@@ -1,6 +1,5 @@
 package com.primaloptima.scribe.ui.screens
 
-import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -12,6 +11,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -19,48 +19,52 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.primaloptima.scribe.ScribeApp
-import com.primaloptima.scribe.ThemeListActivity
+import com.primaloptima.scribe.ui.components.ScribeTopBar
 import com.primaloptima.scribe.ui.theme.FrostedDialog
-import com.primaloptima.scribe.util.WritingStats
+import com.primaloptima.scribe.viewmodel.SettingsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenThemes: () -> Unit
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as ScribeApp
-    val prefs = remember { app.prefs }
     val themeManager = remember { app.themeManager }
-    val writingStats = remember { WritingStats(prefs) }
+    val vm: SettingsViewModel = viewModel()
 
-    var showWordCount by remember { mutableStateOf(prefs.showWordCount) }
-    var typewriterMode by remember { mutableStateOf(prefs.typewriterMode) }
-    var lineSpacing by remember { mutableStateOf(prefs.lineSpacing) }
-    var fontSize by remember { mutableFloatStateOf(prefs.editorFontSize.toFloat()) }
-    var dailyGoal by remember { mutableIntStateOf(prefs.dailyGoal) }
+    val showWordCount by vm.showWordCount.collectAsStateWithLifecycle()
+    val typewriterMode by vm.typewriterMode.collectAsStateWithLifecycle()
+    val lineSpacing by vm.lineSpacing.collectAsStateWithLifecycle()
+    val fontSize by vm.editorFontSize.collectAsStateWithLifecycle()
+    val dailyGoal by vm.dailyGoal.collectAsStateWithLifecycle()
+    val homeStartPage by vm.homeStartPage.collectAsStateWithLifecycle()
+    val todayWords by vm.todayWords.collectAsStateWithLifecycle()
+    val currentStreak by vm.currentStreak.collectAsStateWithLifecycle()
+    val longestStreak by vm.longestStreak.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) { vm.loadStats() }
 
     // History settings
-    var autoHistoryEnabled by remember { mutableStateOf(prefs.autoHistoryEnabled) }
-    var manualCheckpointsEnabled by remember { mutableStateOf(prefs.manualCheckpointsEnabled) }
-    var autoHistorySlots by remember { mutableFloatStateOf(prefs.autoHistorySlots.toFloat()) }
-    var manualCheckpointSlots by remember { mutableFloatStateOf(prefs.manualCheckpointSlots.toFloat()) }
-    var autoHistoryMinWords by remember { mutableFloatStateOf(prefs.autoHistoryMinWords.toFloat()) }
+    val autoHistoryEnabled by vm.autoHistoryEnabled.collectAsStateWithLifecycle()
+    val manualCheckpointsEnabled by vm.manualCheckpointsEnabled.collectAsStateWithLifecycle()
+    val autoHistorySlots by vm.autoHistorySlots.collectAsStateWithLifecycle()
+    val manualCheckpointSlots by vm.manualCheckpointSlots.collectAsStateWithLifecycle()
+    val autoHistoryMinWords by vm.autoHistoryMinWords.collectAsStateWithLifecycle()
 
     var showGoalDialog by remember { mutableStateOf(false) }
-    var homeStartPage by remember { mutableStateOf(prefs.homeStartPage) }
 
     Scaffold(
         contentWindowInsets = WindowInsets.systemBars,
         topBar = {
-            TopAppBar(
-                title = { Text("Settings", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                }
+            ScribeTopBar(
+                title             = "Settings",
+                navigationIcon    = Icons.AutoMirrored.Filled.ArrowBack,
+                onNavigationClick = onBack
             )
         }
     ) { padding ->
@@ -86,10 +90,7 @@ fun SettingsScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(
                             selected = homeStartPage == "books",
-                            onClick = {
-                                homeStartPage = "books"
-                                prefs.homeStartPage = "books"
-                            },
+                            onClick = { vm.setHomeStartPage("books") },
                             label = { Text("Books") },
                             leadingIcon = if (homeStartPage == "books") {
                                 { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
@@ -97,10 +98,7 @@ fun SettingsScreen(
                         )
                         FilterChip(
                             selected = homeStartPage == "dashboard",
-                            onClick = {
-                                homeStartPage = "dashboard"
-                                prefs.homeStartPage = "dashboard"
-                            },
+                            onClick = { vm.setHomeStartPage("dashboard") },
                             label = { Text("Dashboard") },
                             leadingIcon = if (homeStartPage == "dashboard") {
                                 { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
@@ -117,9 +115,7 @@ fun SettingsScreen(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable {
-                        context.startActivity(Intent(context, ThemeListActivity::class.java))
-                    },
+                    .clickable { onOpenThemes() },
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Row(
@@ -153,10 +149,7 @@ fun SettingsScreen(
                         Text("Show Word Count FAB", fontWeight = FontWeight.Medium)
                         Switch(
                             checked = showWordCount,
-                            onCheckedChange = {
-                                showWordCount = it
-                                prefs.showWordCount = it
-                            }
+                            onCheckedChange = { vm.setShowWordCount(it) }
                         )
                     }
 
@@ -168,21 +161,15 @@ fun SettingsScreen(
                         Text("Typewriter Mode (Center Active Line)", fontWeight = FontWeight.Medium)
                         Switch(
                             checked = typewriterMode,
-                            onCheckedChange = {
-                                typewriterMode = it
-                                prefs.typewriterMode = it
-                            }
+                            onCheckedChange = { vm.setTypewriterMode(it) }
                         )
                     }
 
                     Column {
-                        Text("Editor Font Size: ${fontSize.toInt()} sp", fontWeight = FontWeight.Medium)
+                        Text("Editor Font Size: $fontSize sp", fontWeight = FontWeight.Medium)
                         Slider(
-                            value = fontSize,
-                            onValueChange = {
-                                fontSize = it
-                                prefs.editorFontSize = it.toInt()
-                            },
+                            value = fontSize.toFloat(),
+                            onValueChange = { vm.setEditorFontSize(it.toInt()) },
                             valueRange = 12f..28f
                         )
                     }
@@ -208,28 +195,28 @@ fun SettingsScreen(
                         }
                         Switch(
                             checked = autoHistoryEnabled,
-                            onCheckedChange = { autoHistoryEnabled = it; prefs.autoHistoryEnabled = it }
+                            onCheckedChange = { vm.setAutoHistoryEnabled(it) }
                         )
                     }
 
                     if (autoHistoryEnabled) {
                         Column {
-                            Text("Auto-save slots: ${autoHistorySlots.toInt()}", fontWeight = FontWeight.Medium)
+                            Text("Auto-save slots: $autoHistorySlots", fontWeight = FontWeight.Medium)
                             Text("How many auto-saves to keep per note", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
                             Slider(
-                                value = autoHistorySlots,
-                                onValueChange = { autoHistorySlots = it; prefs.autoHistorySlots = it.toInt() },
+                                value = autoHistorySlots.toFloat(),
+                                onValueChange = { vm.setAutoHistorySlots(it.toInt()) },
                                 valueRange = 1f..30f,
                                 steps = 28
                             )
                         }
 
                         Column {
-                            Text("Min words to trigger: ${autoHistoryMinWords.toInt()} words", fontWeight = FontWeight.Medium)
+                            Text("Min words to trigger: $autoHistoryMinWords words", fontWeight = FontWeight.Medium)
                             Text("Net word change needed to auto-save", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
                             Slider(
-                                value = autoHistoryMinWords,
-                                onValueChange = { autoHistoryMinWords = it; prefs.autoHistoryMinWords = it.toInt() },
+                                value = autoHistoryMinWords.toFloat(),
+                                onValueChange = { vm.setAutoHistoryMinWords(it.toInt()) },
                                 valueRange = 1f..100f,
                                 steps = 98
                             )
@@ -249,17 +236,17 @@ fun SettingsScreen(
                         }
                         Switch(
                             checked = manualCheckpointsEnabled,
-                            onCheckedChange = { manualCheckpointsEnabled = it; prefs.manualCheckpointsEnabled = it }
+                            onCheckedChange = { vm.setManualCheckpointsEnabled(it) }
                         )
                     }
 
                     if (manualCheckpointsEnabled) {
                         Column {
-                            Text("Checkpoint slots: ${manualCheckpointSlots.toInt()}", fontWeight = FontWeight.Medium)
+                            Text("Checkpoint slots: $manualCheckpointSlots", fontWeight = FontWeight.Medium)
                             Text("How many checkpoints to keep per note", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
                             Slider(
-                                value = manualCheckpointSlots,
-                                onValueChange = { manualCheckpointSlots = it; prefs.manualCheckpointSlots = it.toInt() },
+                                value = manualCheckpointSlots.toFloat(),
+                                onValueChange = { vm.setManualCheckpointSlots(it.toInt()) },
                                 valueRange = 1f..30f,
                                 steps = 28
                             )
@@ -288,9 +275,9 @@ fun SettingsScreen(
                         Text("Daily Word Goal", fontWeight = FontWeight.Bold)
                         Text("$dailyGoal words", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     }
-                    Text("Words today: ${writingStats.todayWords}", fontSize = 13.sp)
-                    Text("Current streak: ${writingStats.currentStreak()} days", fontSize = 13.sp)
-                    Text("Longest streak: ${writingStats.longestStreak()} days", fontSize = 13.sp)
+                    Text("Words today: $todayWords", fontSize = 13.sp)
+                    Text("Current streak: $currentStreak days", fontSize = 13.sp)
+                    Text("Longest streak: $longestStreak days", fontSize = 13.sp)
                 }
             }
         }
@@ -315,8 +302,7 @@ fun SettingsScreen(
                     onClick = {
                         val num = goalInput.toIntOrNull()
                         if (num != null && num >= 50) {
-                            dailyGoal = num
-                            writingStats.setDailyGoal(num)
+                            vm.setDailyGoal(num)
                             showGoalDialog = false
                             Toast.makeText(context, "Daily goal updated", Toast.LENGTH_SHORT).show()
                         }

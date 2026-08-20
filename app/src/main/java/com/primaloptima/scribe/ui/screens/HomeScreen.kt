@@ -1,6 +1,5 @@
 package com.primaloptima.scribe.ui.screens
 
-import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,8 +14,6 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -24,24 +21,19 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.livedata.observeAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.foundation.gestures.detectTapGestures
+
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import com.primaloptima.scribe.ui.theme.LocalAccentColor
 import android.graphics.Bitmap
 import android.os.Build
-import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.activity.ComponentActivity
 import com.primaloptima.scribe.ui.theme.LocalHazeState
@@ -49,12 +41,8 @@ import com.primaloptima.scribe.ui.theme.localHasBgImage
 import com.primaloptima.scribe.ui.theme.LocalOneShotBitmap
 import com.primaloptima.scribe.ui.theme.LocalBarBlurBitmap
 import com.primaloptima.scribe.ui.theme.LocalSolidSurface
-import com.primaloptima.scribe.ui.theme.frostedBar
-import com.primaloptima.scribe.ui.theme.frostedContainerColor
-import com.primaloptima.scribe.ui.theme.frostedFab
 import com.primaloptima.scribe.ui.theme.frostedPanel
 import com.primaloptima.scribe.ui.theme.FrostedDialog
-import com.primaloptima.scribe.ui.theme.FrostedBarContent
 import com.primaloptima.scribe.ui.theme.FrostedPanelContent
 
 import androidx.compose.material3.LocalContentColor
@@ -63,6 +51,10 @@ import com.primaloptima.scribe.util.GrainTexture
 import androidx.compose.ui.platform.LocalView
 import com.primaloptima.scribe.ui.theme.rememberAdaptiveTextColor
 import dev.chrisbanes.haze.hazeSource
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.ui.platform.LocalInspectionMode
+import androidx.navigation3.ui.LocalNavAnimatedContentScope
+import com.primaloptima.scribe.LocalSharedTransitionScope
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -74,34 +66,51 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.allowHardware
+import com.primaloptima.scribe.ui.components.ScribeExtendedFab
+import com.primaloptima.scribe.ui.components.ScribeSpeedDialFab
+import com.primaloptima.scribe.ui.components.SpeedDialItem
+import com.primaloptima.scribe.ui.components.ScribeFabTokens
+import com.primaloptima.scribe.ui.components.ScribeTopBar
+import com.primaloptima.scribe.ui.components.ScribeNavBar
+import com.primaloptima.scribe.ui.components.ScribeNavItem
+import com.primaloptima.scribe.ui.components.ScribeBarAction
 import com.primaloptima.scribe.*
 import com.primaloptima.scribe.R
-import com.primaloptima.scribe.ScribeApp
 import com.primaloptima.scribe.data.Book
 import com.primaloptima.scribe.data.Folder
 import com.primaloptima.scribe.data.Note
 import com.primaloptima.scribe.util.CoverUtils
-import com.primaloptima.scribe.util.PrefsManager
-import com.primaloptima.scribe.util.ThemeDataStoreRepo
-import com.primaloptima.scribe.viewmodel.HomeViewModel
+import com.primaloptima.scribe.viewmodel.BooksViewModel
+import com.primaloptima.scribe.viewmodel.DashboardViewModel
+import com.primaloptima.scribe.viewmodel.HomeShellViewModel
+import com.primaloptima.scribe.viewmodel.NotesViewModel
+import com.primaloptima.scribe.viewmodel.StatsViewModel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
-    vm: HomeViewModel,
+    shellVm: HomeShellViewModel,
+    dashboardVm: DashboardViewModel,
+    booksVm: BooksViewModel,
+    notesVm: NotesViewModel,
+    statsVm: StatsViewModel,
     onOpenBook: (Book) -> Unit,
     onOpenNote: (noteId: String, bookId: String) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenSheets: () -> Unit,
+    onOpenSheetsCreate: () -> Unit,
     onOpenThemes: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    // Snap to Closed on first composition so the drawer's internal Animatable starts
+    // at its correct off-screen position. Without this, NavDisplay's slide-in transition
+    // causes a single-frame flash as the Animatable animates from 0 → closed offset.
+    LaunchedEffect(Unit) { drawerState.snapTo(DrawerValue.Closed) }
     var rightPanelVisible by remember { mutableStateOf(false) }
     var fabExpanded by remember { mutableStateOf(false) }
 
@@ -119,8 +128,6 @@ fun HomeScreen(
     }
     SideEffect {
         val window = (view.context as? ComponentActivity)?.window ?: return@SideEffect
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        window.navigationBarColor = android.graphics.Color.TRANSPARENT
         WindowInsetsControllerCompat(window, view).isAppearanceLightNavigationBars = !isDarkTheme
     }
 
@@ -137,18 +144,12 @@ fun HomeScreen(
 
     val hazeState = LocalHazeState.current
 
-    val repo = remember { ThemeDataStoreRepo(context) }
-
     // 0: Dashboard, 1: Books, 2: Notes, 3: Statistics
-    val prefs = remember { (context.applicationContext as ScribeApp).prefs }
-    val initialPage = remember { if (prefs.homeStartPage == "dashboard") 0 else 1 }
-    var selectedNavTab by remember { mutableIntStateOf(initialPage) }
+    val homeStartPage by booksVm.homeStartPage.collectAsStateWithLifecycle()
+    val initialPage = remember(homeStartPage) { if (homeStartPage == "dashboard") 0 else 1 }
+    val selectedNavTab by shellVm.selectedTab.collectAsStateWithLifecycle()
     var isGridMode by remember { mutableStateOf(true) }
-    var gridColumns by remember { mutableIntStateOf(2) }
-
-    LaunchedEffect(Unit) {
-        repo.gridColumnsFlow.collectLatest { gridColumns = it }
-    }
+    val gridColumns by booksVm.gridColumns.collectAsStateWithLifecycle()
 
     // Pre-bake grain texture on first composition so the first drawer open uses
     // the cached bitmap rather than the inline LCG fallback. Warm-up runs on IO
@@ -163,9 +164,8 @@ fun HomeScreen(
         }
     }
 
-    val pagerState = rememberPagerState(initialPage = initialPage) { 4 }
-    LaunchedEffect(pagerState.currentPage) {
-        selectedNavTab = pagerState.currentPage
+    LaunchedEffect(Unit) {
+        shellVm.setInitialTab(initialPage)
     }
     // Collapse speed-dial whenever the user switches tabs
     LaunchedEffect(selectedNavTab) {
@@ -180,28 +180,19 @@ fun HomeScreen(
     var isSearching by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
 
-    val allBooks by vm.books.observeAsState(emptyList())
-    val allNotes by vm.allNotes.observeAsState(emptyList())
-    val allFolders by vm.allFolders.observeAsState(emptyList())
+    val allBooks by booksVm.books.collectAsStateWithLifecycle()
+    // Pre-sorted list from ViewModel StateFlow — sort runs in the coroutine layer,
+    // never inside composition. See BooksViewModel.sortedBooks for details.
+    val sortedBooks by booksVm.sortedBooks.collectAsStateWithLifecycle()
+    val allNotes by notesVm.allNotes.collectAsStateWithLifecycle()
+    val allFolders by notesVm.allFolders.collectAsStateWithLifecycle()
 
-    // Book stats computations
-    val bookWordCounts = remember(allNotes, allBooks) {
-        allBooks.associate { book ->
-            book.id to allNotes.filter { it.bookId == book.id }.sumOf { n ->
-                n.content.split("\\s+".toRegex()).count { it.isNotBlank() }
-            }
-        }
-    }
-    val bookFileCounts = remember(allNotes, allBooks) {
-        allBooks.associate { book ->
-            book.id to allNotes.count { it.bookId == book.id }
-        }
-    }
-    val bookFolderCounts = remember(allFolders, allBooks) {
-        allBooks.associate { book ->
-            book.id to allFolders.count { it.bookId == book.id && it.path != "/" }
-        }
-    }
+    // Book stats — all driven by DB-backed VM StateFlows; no in-memory loops.
+    val bookWordCounts by booksVm.bookWordCounts.collectAsStateWithLifecycle()
+    // Phase 2-A: DB aggregate from VM — no Kotlin loop over allNotes on every recomposition
+    val bookFileCounts by booksVm.bookNoteCounts.collectAsStateWithLifecycle()
+    // DB aggregate — replaces in-memory allFolders.count { } loop
+    val bookFolderCounts by booksVm.bookFolderCounts.collectAsStateWithLifecycle()
 
     // Dialog states
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -252,7 +243,7 @@ fun HomeScreen(
         uri ?: return@rememberLauncherForActivityResult
         scope.launch(Dispatchers.IO) {
             val savedUri = CoverUtils.saveCoverImage(context.applicationContext, book.id, uri)
-            vm.updateCover(book.id, savedUri)
+            booksVm.updateCover(book.id, savedUri)
         }
         bookToChangeCover = null
     }
@@ -273,7 +264,8 @@ fun HomeScreen(
                 // screen content — no drawer pixels, no recomposition yet.
                 // rawDrawerBitmap assignment triggers the IO blur LaunchedEffect
                 // which runs in parallel with the opening animation.
-                if (drawerState.isClosed && startX < size.width * 0.3f && totalX > threshold) {
+                if (drawerState.isClosed && !drawerState.isAnimationRunning
+                        && startX < size.width * 0.3f && totalX > threshold) {
                     change.consume()
                     scope.launch { drawerState.open() }
                 }
@@ -304,7 +296,7 @@ fun HomeScreen(
                 val (adaptiveTextColor, adaptiveTextModifier) = rememberAdaptiveTextColor(
                     fallback = MaterialTheme.colorScheme.onSurface
                 )
-                val currentStreak by vm.currentStreak.collectAsState()
+                val currentStreak by dashboardVm.currentStreak.collectAsStateWithLifecycle()
 
                 // ── HEADER: icon + wordmark + avatar + streak ──
                 Spacer(modifier = Modifier.height(28.dp))
@@ -462,400 +454,138 @@ fun HomeScreen(
             containerColor = Color.Transparent,
             modifier = Modifier.then(swipeGestureModifier),
             topBar = {
-                // On API < 31 frostedBar needs LocalOneShotBitmap to be non-null.
-                // LocalBarBlurBitmap is provided by ScribeTheme from the Coil bitmap —
-                // no screen capture needed; already available when the image is loaded.
-                CompositionLocalProvider(LocalOneShotBitmap provides LocalBarBlurBitmap.current) {
-                FrostedBarContent {
-
-                // ── Full-screen search overlay ──────────────────────────────
-                // When search is active, a full overlay slides down from the top
-                // so the user has a proper wide search field instead of a cramped
-                // one inside the narrow top bar.
+                // Full-screen search overlay — slides down from top when searching.
                 AnimatedVisibility(
                     visible = isSearching,
                     enter = slideInVertically(initialOffsetY = { -it }, animationSpec = tween(220)) + fadeIn(tween(220)),
-                    exit = slideOutVertically(targetOffsetY = { -it }, animationSpec = tween(180)) + fadeOut(tween(180))
+                    exit  = slideOutVertically(targetOffsetY = { -it }, animationSpec = tween(180)) + fadeOut(tween(180))
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .statusBarsPadding()
-                            .padding(top = 8.dp)
+                            .padding(top = 8.dp, bottom = 8.dp)
                             .padding(horizontal = 12.dp)
-                            .padding(bottom = 8.dp)
                     ) {
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = { searchQuery = it },
                             placeholder = { Text("Search titles, notes, folders...") },
                             singleLine = true,
-                            leadingIcon = {
-                                Icon(Icons.Default.Search, contentDescription = null)
-                            },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                             trailingIcon = {
                                 IconButton(onClick = {
-                                    if (searchQuery.isNotEmpty()) searchQuery = ""
-                                    else isSearching = false
-                                }) {
-                                    Icon(Icons.Default.Clear, contentDescription = "Clear")
-                                }
+                                    if (searchQuery.isNotEmpty()) searchQuery = "" else isSearching = false
+                                }) { Icon(Icons.Default.Clear, contentDescription = "Clear") }
                             },
                             shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(54.dp)
+                            modifier = Modifier.fillMaxWidth().height(54.dp)
                         )
                     }
                 }
 
-                TopAppBar(
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Transparent
-                    ),
-                    windowInsets = WindowInsets(0.dp),
-                    modifier = Modifier
-                        .frostedBar(hazeState)
-                        .statusBarsPadding()
-                        .height(52.dp),
-                    title = {
-                        val (titleColor, titleModifier) = rememberAdaptiveTextColor(
-                            fallback = MaterialTheme.colorScheme.onSurface
+                // Shared bar — only visible when NOT searching.
+                // DropdownMenu for sort/grid is hoisted here since ScribeTopBar
+                // delivers the MoreVert click via ScribeBarAction.onClick.
+                if (!isSearching) {
+                    var showSortMenu by remember { mutableStateOf(false) }
+                    Box {
+                        ScribeTopBar(
+                            title             = "Scribe",
+                            navigationIcon    = Icons.Default.Menu,
+                            onNavigationClick = { scope.launch { drawerState.open() } },
+                            actions = buildList {
+                                add(ScribeBarAction(Icons.Default.Search, "Search") { isSearching = true })
+                                if (selectedNavTab == 1) {
+                                    add(ScribeBarAction(
+                                        if (isGridMode) Icons.Filled.ViewList else Icons.Default.GridView,
+                                        "Toggle view"
+                                    ) { isGridMode = !isGridMode })
+                                    add(ScribeBarAction(Icons.Default.MoreVert, "More options") { showSortMenu = true })
+                                }
+                            }
                         )
-                        Text(
-                            "Scribe",
-                            fontWeight = FontWeight.Bold,
-                            color = titleColor,
-                            modifier = titleModifier
-                        )
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = {
-                            scope.launch { drawerState.open() }
-                        }) {
-                            val (iconColor, iconModifier) = rememberAdaptiveTextColor(
-                                fallback = MaterialTheme.colorScheme.primary
-                            )
-                            Icon(
-                                Icons.Default.Menu,
-                                contentDescription = "Menu",
-                                tint = iconColor,
-                                modifier = iconModifier
-                            )
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = { isSearching = true }) {
-                            Icon(Icons.Default.Search, contentDescription = "Search")
-                        }
                         if (selectedNavTab == 1) {
-                            IconButton(onClick = { isGridMode = !isGridMode }) {
-                                Icon(
-                                    if (isGridMode) Icons.Default.ViewList else Icons.Default.GridView,
-                                    contentDescription = "Toggle Grid/List View"
-                                )
-                            }
-                            var showSortMenu by remember { mutableStateOf(false) }
-                            IconButton(onClick = { showSortMenu = true }) {
-                                Icon(Icons.Default.MoreVert, contentDescription = "More Options")
-                            }
                             DropdownMenu(
-                                expanded = showSortMenu,
+                                expanded         = showSortMenu,
                                 onDismissRequest = { showSortMenu = false },
-                                containerColor = LocalSolidSurface.current
+                                containerColor   = LocalSolidSurface.current
                             ) {
-                                // Grid column toggle (only shown in grid mode)
                                 if (isGridMode) {
                                     DropdownMenuItem(
                                         text = { Text(if (gridColumns == 2) "3 Columns" else "2 Columns") },
                                         leadingIcon = { Icon(Icons.Default.GridView, contentDescription = null, modifier = Modifier.size(18.dp)) },
                                         onClick = {
                                             val nextCols = if (gridColumns == 2) 3 else 2
-                                            gridColumns = nextCols
-                                            scope.launch { repo.setGridColumns(nextCols) }
+                                            booksVm.setGridColumns(nextCols)
                                             showSortMenu = false
                                         }
                                     )
                                     HorizontalDivider()
                                 }
-                                DropdownMenuItem(
-                                    text = { Text("Date Updated") },
-                                    onClick = {
-                                        vm.setSortMode(HomeViewModel.SortMode.DATE_UPDATED)
-                                        showSortMenu = false
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Date Created") },
-                                    onClick = {
-                                        vm.setSortMode(HomeViewModel.SortMode.DATE_CREATED)
-                                        showSortMenu = false
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Title (A-Z)") },
-                                    onClick = {
-                                        vm.setSortMode(HomeViewModel.SortMode.TITLE_AZ)
-                                        showSortMenu = false
-                                    }
-                                )
+                                DropdownMenuItem(text = { Text("Date Updated") }, onClick = { booksVm.setSortMode(BooksViewModel.SortMode.DATE_UPDATED); showSortMenu = false })
+                                DropdownMenuItem(text = { Text("Date Created") }, onClick = { booksVm.setSortMode(BooksViewModel.SortMode.DATE_CREATED); showSortMenu = false })
+                                DropdownMenuItem(text = { Text("Title (A-Z)") },  onClick = { booksVm.setSortMode(BooksViewModel.SortMode.TITLE_AZ);     showSortMenu = false })
                             }
                         }
                     }
-                )
-                } // end FrostedBarContent for topBar
-                } // end CompositionLocalProvider(LocalBarBlurBitmap for topBar)
+                }
             },
             bottomBar = {
-                CompositionLocalProvider(LocalOneShotBitmap provides LocalBarBlurBitmap.current) {
-                FrostedBarContent {
-                NavigationBar(
-                    containerColor = Color.Transparent,
-                    tonalElevation = 0.dp,
-                    windowInsets = WindowInsets(0.dp),
-                    modifier = Modifier
-                        .frostedBar(hazeState)
-                        .navigationBarsPadding()
-                        .height(58.dp)
-                ) {
-                    val accentColor = LocalAccentColor.current
-                    val navColors = NavigationBarItemDefaults.colors(
-                        indicatorColor = accentColor,
-                        selectedIconColor = MaterialTheme.colorScheme.onPrimary,
-                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    NavigationBarItem(
-                        selected = selectedNavTab == 0 && !isSearching,
-                        onClick = {
-                            selectedNavTab = 0
-                            isSearching = false
-                            scope.launch { pagerState.animateScrollToPage(0) }
-                        },
-                        icon = { Icon(Icons.Default.Dashboard, contentDescription = "Dashboard", modifier = Modifier.size(20.dp)) },
-                        label = { Text("Dashboard", fontSize = 9.sp) },
-                        colors = navColors
-                    )
-                    NavigationBarItem(
-                        selected = selectedNavTab == 1 && !isSearching,
-                        onClick = {
-                            selectedNavTab = 1
-                            isSearching = false
-                            scope.launch { pagerState.animateScrollToPage(1) }
-                        },
-                        icon = { Icon(Icons.Default.Book, contentDescription = "Books", modifier = Modifier.size(20.dp)) },
-                        label = { Text("Books", fontSize = 9.sp) },
-                        colors = navColors
-                    )
-                    NavigationBarItem(
-                        selected = selectedNavTab == 2 && !isSearching,
-                        onClick = {
-                            selectedNavTab = 2
-                            isSearching = false
-                            scope.launch { pagerState.animateScrollToPage(2) }
-                        },
-                        icon = { Icon(Icons.Default.StickyNote2, contentDescription = "Notes", modifier = Modifier.size(20.dp)) },
-                        label = { Text("Notes", fontSize = 9.sp) },
-                        colors = navColors
-                    )
-                    NavigationBarItem(
-                        selected = selectedNavTab == 3 && !isSearching,
-                        onClick = {
-                            selectedNavTab = 3
-                            isSearching = false
-                            scope.launch { pagerState.animateScrollToPage(3) }
-                        },
-                        icon = { Icon(Icons.Default.BarChart, contentDescription = "Statistics", modifier = Modifier.size(20.dp)) },
-                        label = { Text("Stats", fontSize = 9.sp) },
-                        colors = navColors
-                    )
-                }
-                } // end FrostedBarContent for bottomBar
-                } // end CompositionLocalProvider(LocalBarBlurBitmap for bottomBar)
+                ScribeNavBar(
+                    items = listOf(
+                        ScribeNavItem(Icons.Default.Dashboard,   "Dashboard"),
+                        ScribeNavItem(Icons.Default.Book,        "Books"),
+                        ScribeNavItem(Icons.Filled.StickyNote2,  "Notes"),
+                        ScribeNavItem(Icons.Default.BarChart,    "Stats"),
+                    ),
+                    selectedIndex = selectedNavTab,
+                    onTabSelected = { tab ->
+                        shellVm.selectTab(tab)
+                        isSearching = false
+                        fabExpanded = false
+                    }
+                )
             },
             floatingActionButton = {
                 // FAB is always visible — LocalBarBlurBitmap (derived from the Coil
                 // image in ScribeTheme) is already loaded, no screen capture needed.
                 CompositionLocalProvider(LocalOneShotBitmap provides LocalBarBlurBitmap.current) {
-                val accentClr = LocalAccentColor.current
-
                 AnimatedContent(
                     targetState = selectedNavTab,
                     transitionSpec = {
-                        (scaleIn(spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)) +
-                                fadeIn()) togetherWith (scaleOut() + fadeOut())
+                        ScribeFabTokens.TabSwitchEnter togetherWith ScribeFabTokens.TabSwitchExit
                     },
                     label = "fabSwitch"
                 ) { tab ->
                     when (tab) {
                         0 -> Box(Modifier) // Dashboard — no FAB; actions live inside the screen
-                        1 -> {
-                            // ── Morph speed-dial FAB ──
-                            AnimatedContent(
-                                targetState = fabExpanded,
-                                transitionSpec = {
-                                    if (targetState) {
-                                        // Expanding → spring scale from bottom-right + fade in
-                                        (scaleIn(
-                                            animationSpec = spring(
-                                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                stiffness = Spring.StiffnessMedium
-                                            ),
-                                            transformOrigin = TransformOrigin(1f, 1f)
-                                        ) + fadeIn()) togetherWith
-                                        (scaleOut(
-                                            targetScale = 0.75f,
-                                            transformOrigin = TransformOrigin(1f, 1f)
-                                        ) + fadeOut(tween(100)))
-                                    } else {
-                                        // Collapsing → quick tween scale out + fade out
-                                        (scaleIn(
-                                            initialScale = 0.75f,
-                                            transformOrigin = TransformOrigin(1f, 1f)
-                                        ) + fadeIn(tween(100))) togetherWith
-                                        (scaleOut(
-                                            animationSpec = tween(180),
-                                            transformOrigin = TransformOrigin(1f, 1f)
-                                        ) + fadeOut(tween(180)))
+                        1 -> ScribeSpeedDialFab(
+                            items = listOf(
+                                SpeedDialItem(
+                                    icon  = Icons.Default.Add,
+                                    label = "New Book",
+                                    onClick = {
+                                        scope.launch { captureForDialog { showCreateDialog = true } }
                                     }
-                                },
-                                label = "fabMorph"
-                            ) { expanded ->
-                                if (expanded) {
-                                    // ── Speed-dial card ──
-                                    var showItems by remember { mutableStateOf(false) }
-                                    LaunchedEffect(Unit) { showItems = true }
-
-                                    Surface(
-                                        shape = RoundedCornerShape(20.dp),
-                                        color = frostedContainerColor(
-                                            fallback = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-                                        ),
-                                        tonalElevation = 0.dp,
-                                        modifier = Modifier
-                                            .width(200.dp)
-                                            .frostedFab(LocalHazeState.current, shape = RoundedCornerShape(20.dp))
-                                    ) {
-                                        Column {
-                                            // Item 1 — New Book
-                                            AnimatedVisibility(
-                                                visible = showItems,
-                                                enter = fadeIn(tween(150)) + slideInVertically(
-                                                    initialOffsetY = { 30 },
-                                                    animationSpec = tween(200)
-                                                )
-                                            ) {
-                                                Row(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .clickable {
-                                                            fabExpanded = false
-                                                            scope.launch {
-                                                                captureForDialog { showCreateDialog = true }
-                                                            }
-                                                        }
-                                                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Icon(
-                                                        Icons.Default.Add,
-                                                        contentDescription = "New Book",
-                                                        modifier = Modifier.size(18.dp),
-                                                        tint = accentClr
-                                                    )
-                                                    Spacer(modifier = Modifier.width(10.dp))
-                                                    Text(
-                                                        "New Book",
-                                                        fontSize = 15.sp,
-                                                        color = MaterialTheme.colorScheme.onSurface
-                                                    )
-                                                }
-                                            }
-
-                                            HorizontalDivider(
-                                                thickness = 0.5.dp,
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
-                                            )
-
-                                            // Item 2 — New Sheet (staggered 60ms)
-                                            AnimatedVisibility(
-                                                visible = showItems,
-                                                enter = fadeIn(tween(150, delayMillis = 60)) +
-                                                        slideInVertically(
-                                                            initialOffsetY = { 30 },
-                                                            animationSpec = tween(200, delayMillis = 60)
-                                                        )
-                                            ) {
-                                                Row(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .clickable {
-                                                            fabExpanded = false
-                                                            context.startActivity(
-                                                                Intent(context, SheetsActivity::class.java)
-                                                                    .putExtra(SheetsActivity.EXTRA_OPEN_CREATE, true)
-                                                            )
-                                                        }
-                                                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Icon(
-                                                        Icons.Outlined.Book,
-                                                        contentDescription = "New Sheet",
-                                                        modifier = Modifier.size(18.dp),
-                                                        tint = accentClr
-                                                    )
-                                                    Spacer(modifier = Modifier.width(10.dp))
-                                                    Text(
-                                                        "New Sheet",
-                                                        fontSize = 15.sp,
-                                                        color = MaterialTheme.colorScheme.onSurface
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    // ── Collapsed FAB ──
-                                    FloatingActionButton(
-                                        onClick = { fabExpanded = true },
-                                        containerColor = frostedContainerColor(fallback = accentClr),
-                                        contentColor = Color.White,
-                                        shape = RoundedCornerShape(16.dp),
-                                        elevation = FloatingActionButtonDefaults.elevation(
-                                            defaultElevation = 0.dp,
-                                            pressedElevation = 0.dp,
-                                            focusedElevation = 0.dp,
-                                            hoveredElevation = 0.dp
-                                        ),
-                                        modifier = Modifier.frostedFab(LocalHazeState.current, shape = RoundedCornerShape(16.dp))
-                                    ) {
-                                        Icon(Icons.Default.Add, contentDescription = "New Book")
-                                    }
+                                ),
+                                SpeedDialItem(
+                                    icon  = Icons.Outlined.Book,
+                                    label = "New Sheet",
+                                    onClick = { onOpenSheetsCreate() }
+                                ),
+                            ),
+                            expanded         = fabExpanded,
+                            onExpandedChange = { fabExpanded = it },
+                        )
+                        2 -> ScribeExtendedFab(
+                            icon  = Icons.Default.Edit,
+                            label = "Quick Note",
+                            onClick = {
+                                booksVm.createQuickNote { note ->
+                                    onOpenNote(note.id, note.bookId)
                                 }
                             }
-                        }
-                        2 -> ExtendedFloatingActionButton(
-                            onClick = {
-                                vm.createQuickNote { note ->
-                                    context.startActivity(
-                                        Intent(context, MainActivity::class.java)
-                                            .putExtra(MainActivity.EXTRA_NOTE_ID, note.id)
-                                            .putExtra(MainActivity.EXTRA_BOOK_ID, note.bookId)
-                                    )
-                                }
-                            },
-                            icon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                            text = { Text("Quick Note") },
-                            containerColor = frostedContainerColor(fallback = accentClr),
-                            contentColor = Color.White,
-                            shape = RoundedCornerShape(16.dp),
-                            elevation = FloatingActionButtonDefaults.elevation(
-                                defaultElevation = 0.dp,
-                                pressedElevation = 0.dp,
-                                focusedElevation = 0.dp,
-                                hoveredElevation = 0.dp
-                            ),
-                            modifier = Modifier.frostedFab(LocalHazeState.current, shape = RoundedCornerShape(16.dp))
                         )
                         else -> Box(Modifier)
                     }
@@ -874,38 +604,40 @@ fun HomeScreen(
                         allBooks = allBooks,
                         allNotes = allNotes,
                         onOpenNote = { note ->
-                            context.startActivity(
-                                Intent(context, MainActivity::class.java)
-                                    .putExtra(MainActivity.EXTRA_NOTE_ID, note.id)
-                                    .putExtra(MainActivity.EXTRA_BOOK_ID, note.bookId)
-                            )
+                            onOpenNote(note.id, note.bookId)
                         }
                     )
                 } else {
-                    HorizontalPager(
-                        state = pagerState,
+                    AnimatedContent(
+                        targetState = selectedNavTab,
+                        transitionSpec = {
+                            if (targetState > initialState) {
+                                slideInHorizontally { it } togetherWith slideOutHorizontally { -it }
+                            } else {
+                                slideInHorizontally { -it } togetherWith slideOutHorizontally { it }
+                            }
+                        },
+                        label = "tab-content",
                         modifier = Modifier
                             .fillMaxSize()
-                            .then(if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier)
                     ) { page ->
                         when (page) {
                             0 -> DashboardTabContent(
-                                vm = vm,
+                                vm = dashboardVm,
                                 allBooks = allBooks,
+                                bookWordCounts = bookWordCounts,
                                 onOpenNote = onOpenNote,
                                 onOpenBook = onOpenBook,
                                 onGoToStats = {
-                                    selectedNavTab = 3
-                                    scope.launch { pagerState.animateScrollToPage(3) }
+                                    shellVm.selectTab(3)
                                 },
                                 onGoToBooks = {
-                                    selectedNavTab = 1
-                                    scope.launch { pagerState.animateScrollToPage(1) }
+                                    shellVm.selectTab(1)
                                 },
                                 onOpenSheets = onOpenSheets
                             )
                             1 -> BooksTabContent(
-                                books = vm.sortedBooks(allBooks),
+                                books = sortedBooks,
                                 isGridMode = isGridMode,
                                 gridColumns = gridColumns,
                                 wordCounts = bookWordCounts,
@@ -923,17 +655,16 @@ fun HomeScreen(
                             2 -> NotesTabContent(
                                 allNotes = allNotes,
                                 onOpenNote = { note ->
-                                    context.startActivity(
-                                        Intent(context, MainActivity::class.java)
-                                            .putExtra(MainActivity.EXTRA_NOTE_ID, note.id)
-                                            .putExtra(MainActivity.EXTRA_BOOK_ID, note.bookId)
-                                    )
+                                    onOpenNote(note.id, note.bookId)
                                 }
                             )
                             3 -> MainStatisticsTabContent(
+                                dashboardVm = dashboardVm,
+                                statsVm = statsVm,
                                 allBooks = allBooks,
                                 allNotes = allNotes,
-                                allFolders = allFolders
+                                allFolders = allFolders,
+                                bookWordCounts = bookWordCounts
                             )
                         }
                     }
@@ -968,9 +699,8 @@ fun HomeScreen(
                 }
 
                 // ── Right stats panel ──
-                val totalWords = remember(allNotes) {
-                    allNotes.sumOf { n -> n.content.split("\\s+".toRegex()).count { it.isNotBlank() } }
-                }
+                // DB aggregate — replaces allNotes.sumOf { it.wordCount } in-memory loop
+                val totalWords by booksVm.vaultWordCount.collectAsStateWithLifecycle()
                 AnimatedVisibility(
                     visible = rightPanelVisible,
                     modifier = Modifier.align(Alignment.CenterEnd),
@@ -999,7 +729,7 @@ fun HomeScreen(
                     }
                     HorizontalDivider()
                     StatPanelRow(Icons.Default.Book, "Books", "${allBooks.size}")
-                    StatPanelRow(Icons.Default.StickyNote2, "Notes", "${allNotes.size}")
+                    StatPanelRow(Icons.Filled.StickyNote2, "Notes", "${allNotes.size}")
                     StatPanelRow(Icons.Default.TextFields, "Total words", "$totalWords")
                     StatPanelRow(Icons.Default.FolderOpen, "Folders", "${allFolders.size}")
                     Spacer(modifier = Modifier.weight(1f))
@@ -1060,7 +790,7 @@ fun HomeScreen(
                     onClick = {
                         val title = newTitle.trim()
                         if (title.isNotEmpty()) {
-                            vm.createBook(title) { showCreateDialog = false }
+                            booksVm.createBook(title) { showCreateDialog = false }
                         }
                     }
                 ) { Text("Create") }
@@ -1089,7 +819,7 @@ fun HomeScreen(
                     onClick = {
                         val t = renameText.trim()
                         if (t.isNotEmpty()) {
-                            vm.renameBook(book.id, t)
+                            booksVm.renameBook(book.id, t)
                         }
                         bookToRename = null
                     }
@@ -1109,7 +839,7 @@ fun HomeScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        vm.deleteBook(book.id)
+                        booksVm.deleteBook(book.id)
                         bookToDelete = null
                     }
                 ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
@@ -1187,7 +917,7 @@ private fun BooksTabContent(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(books, key = { it.id }) { book ->
+                items(books, key = { it.id }, contentType = { "book_card" }) { book ->
                     BookGridCard(
                         book = book,
                         words = wordCounts[book.id] ?: 0,
@@ -1205,7 +935,7 @@ private fun BooksTabContent(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(books, key = { it.id }) { book ->
+                items(books, key = { it.id }, contentType = { "book_row" }) { book ->
                     val firstNote = allNotes.firstOrNull { it.bookId == book.id && it.content.isNotBlank() }
                     val introSnippet = firstNote?.content?.take(100)?.replace("\n", " ") ?: "No book intro"
                     BookListRow(
@@ -1225,6 +955,7 @@ private fun BooksTabContent(
     }
 }
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun BookGridCard(
     book: Book,
@@ -1237,68 +968,35 @@ private fun BookGridCard(
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
-    // ── Idle floating bob ────────────────────────────────────────────────
-    val infiniteTransition = rememberInfiniteTransition(label = "float")
-    val floatY by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = -5f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "floatY"
-    )
-
-    // ── Press 3-D tilt ───────────────────────────────────────────────────
-    var isPressed by remember { mutableStateOf(false) }
-    var pressOffset by remember { mutableStateOf(Offset.Zero) }
-
-    val targetRotX = if (isPressed) (pressOffset.y - 100f) * 0.04f else 0f
-    val targetRotY = if (isPressed) -(pressOffset.x - 80f) * 0.04f else 0f
-    val targetScale = if (isPressed) 0.95f else 1f
-    val targetElev  = if (isPressed) 2f else 12f
-
-    val rotX  by animateFloatAsState(targetRotX,  spring(dampingRatio = Spring.DampingRatioMediumBouncy), label = "rotX")
-    val rotY  by animateFloatAsState(targetRotY,  spring(dampingRatio = Spring.DampingRatioMediumBouncy), label = "rotY")
-    val scale by animateFloatAsState(targetScale, spring(dampingRatio = Spring.DampingRatioMediumBouncy), label = "scale")
-    val elev  by animateFloatAsState(targetElev,  tween(200), label = "elev")
+    // Phase 1: shared element transition setup.
+    // sharedTransitionScope is null in @Preview (LocalInspectionMode) — guard accordingly.
+    val sharedTransitionScope = LocalSharedTransitionScope.current
+    val animatedContentScope = if (LocalInspectionMode.current) null
+                               else LocalNavAnimatedContentScope.current
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onPress = { offset ->
-                        isPressed = true
-                        pressOffset = offset
-                        tryAwaitRelease()
-                        isPressed = false
-                    },
-                    onTap = { onOpen() }
-                )
-            },
+            .clickable { onOpen() },
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // graphicsLayer is scoped to the cover Box only — floating bob, 3-D tilt,
-        // and shadow should not affect the title or stats text below.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .graphicsLayer {
-                    translationY    = floatY
-                    scaleX          = scale
-                    scaleY          = scale
-                    rotationX       = rotX
-                    rotationY       = rotY
-                    cameraDistance  = 10f * density
-                    shadowElevation = elev.dp.toPx()
-                }
                 .aspectRatio(0.72f)
-                .shadow(elev.dp, RoundedCornerShape(8.dp))
                 .clip(RoundedCornerShape(8.dp))
         ) {
             if (book.coverUri != null) {
                 val context = LocalContext.current
+                // Phase 1: sharedElement morphs the cover between HomeScreen grid and BookScreen header.
+                val coverModifier = if (sharedTransitionScope != null && animatedContentScope != null) {
+                    with(sharedTransitionScope) {
+                        Modifier.fillMaxSize().sharedElement(
+                            sharedContentState = rememberSharedContentState(key = "book_cover_${book.id}"),
+                            animatedVisibilityScope = animatedContentScope
+                        )
+                    }
+                } else Modifier.fillMaxSize()
                 AsyncImage(
                     // On API < 31, one-shot blur uses View.draw(softwareCanvas).
                     // Hardware bitmaps (Coil's default) crash that call silently,
@@ -1315,7 +1013,7 @@ private fun BookGridCard(
                     },
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = coverModifier
                 )
             } else {
                 Box(
@@ -1356,6 +1054,17 @@ private fun BookGridCard(
 
         Spacer(modifier = Modifier.height(6.dp))
 
+        // Phase 1: sharedBounds (not sharedElement) because the text style changes
+        // between the small grid label here and the large header in BookScreen.
+        val titleModifier = if (sharedTransitionScope != null && animatedContentScope != null) {
+            with(sharedTransitionScope) {
+                Modifier.fillMaxWidth().padding(horizontal = 2.dp).sharedBounds(
+                    sharedContentState = rememberSharedContentState(key = "book_title_${book.id}"),
+                    animatedVisibilityScope = animatedContentScope
+                )
+            }
+        } else Modifier.fillMaxWidth().padding(horizontal = 2.dp)
+
         Text(
             text = book.title,
             fontSize = 13.sp,
@@ -1364,7 +1073,7 @@ private fun BookGridCard(
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp)
+            modifier = titleModifier
         )
 
         Spacer(modifier = Modifier.height(2.dp))
@@ -1450,7 +1159,7 @@ private fun BookListRow(
                     ) {
                         Text("Tt $words", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Icon(Icons.Default.Article, contentDescription = null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Icon(Icons.Filled.Article, contentDescription = null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text("$files", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -1506,8 +1215,8 @@ private fun NotesTabContent(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(allNotes, key = { "notes_tab_${it.id}" }) { note ->
-                    val wordCount = note.content.split("\\s+".toRegex()).count { it.isNotBlank() }
+                items(allNotes, key = { "notes_tab_${it.id}" }, contentType = { "note_row" }) { note ->
+                    val wordCount = note.wordCount
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()

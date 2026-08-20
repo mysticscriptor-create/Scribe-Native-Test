@@ -7,9 +7,12 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
+// Phase 2-A: bumped to version 6 (added indexes on book_id and book_id+folder_path)
+// Stats upgrade: bumped to version 7 (added writing_log table)
+// BookScreen header: bumped to version 8 (added summary + tags columns to books)
 @Database(
-    entities = [Note::class, Folder::class, WorldEntry::class, Book::class, NoteVersion::class],
-    version = 4,
+    entities = [Note::class, Folder::class, WorldEntry::class, Book::class, NoteVersion::class, WritingLog::class],
+    version = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -18,8 +21,15 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun worldEntryDao(): WorldEntryDao
     abstract fun bookDao(): BookDao
     abstract fun noteVersionDao(): NoteVersionDao
+    abstract fun writingLogDao(): WritingLogDao
 
     companion object {
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE notes ADD COLUMN formats_json TEXT")
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -98,6 +108,79 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v4 → v5: add `word_count` column to notes (Phase 1-A).
+         * Defaults to 0; real values are backfilled on first launch by ScribeApp.runWordCountBackfill().
+         * SQLite does not support word counting natively — the Kotlin-side backfill handles it.
+         */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE notes ADD COLUMN word_count INTEGER NOT NULL DEFAULT 0"
+                )
+                // Real word counts are backfilled in ScribeApp.onCreate() via a coroutine.
+                // Existing notes show 0 briefly (~1 second for 100 notes) until backfill completes.
+            }
+        }
+
+        /**
+         * v5 → v6: add indexes on notes(book_id) and notes(book_id, folder_path).
+         * Purely additive — no data touched, no columns changed.
+         * Speeds up all SUM/COUNT queries used by HomeViewModel aggregate flows.
+         */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_notes_book_id ON notes (book_id)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_notes_book_id_folder_path ON notes (book_id, folder_path)")
+            }
+        }
+
+        /**
+         * v6 → v7: add writing_log table with three indexes.
+         * Purely additive — no existing data touched.
+         * After this migration, EditorViewModel will start populating the table
+         * on every save (Phase 2).
+         */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS writing_log (
+                        date TEXT NOT NULL,
+                        note_id TEXT NOT NULL,
+                        book_id TEXT NOT NULL,
+                        folder_path TEXT NOT NULL,
+                        words_added INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY (date, note_id)
+                    )
+                """.trimIndent())
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_writing_log_date ON writing_log (date)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_writing_log_book_id_date ON writing_log (book_id, date)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_writing_log_folder_date ON writing_log (book_id, folder_path, date)"
+                )
+            }
+        }
+
+        /**
+         * v7 → v8: add `summary` and `tags` columns to books table.
+         * Purely additive — all existing books get empty strings as defaults.
+         * Used by BookScreen header to let authors write a book blurb and genre tags.
+         */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE books ADD COLUMN summary TEXT NOT NULL DEFAULT ''"
+                )
+                database.execSQL(
+                    "ALTER TABLE books ADD COLUMN tags TEXT NOT NULL DEFAULT ''"
+                )
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val db = Room.databaseBuilder(
@@ -105,7 +188,16 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "scribe.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(
+                        MIGRATION_1_2,
+                        MIGRATION_2_3,
+                        MIGRATION_3_4,
+                        MIGRATION_4_5,
+                        MIGRATION_5_6,
+                        MIGRATION_6_7,
+                        MIGRATION_7_8,
+                        MIGRATION_8_9
+                    )
                     .addCallback(object : Callback() {
                         override fun onCreate(db: SupportSQLiteDatabase) {
                             super.onCreate(db)

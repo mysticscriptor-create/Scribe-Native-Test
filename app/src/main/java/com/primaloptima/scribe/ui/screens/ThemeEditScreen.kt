@@ -26,10 +26,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.FormatAlignLeft
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.livedata.observeAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -55,12 +57,13 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import com.google.gson.GsonBuilder
+import com.primaloptima.scribe.util.AppJson
 import com.primaloptima.scribe.ui.theme.FontHelper
 import com.primaloptima.scribe.ui.theme.FrostedDialog
 import com.primaloptima.scribe.ui.theme.LocalHazeState
 import com.primaloptima.scribe.ui.theme.LocalOneShotBitmap
-import com.primaloptima.scribe.ui.theme.frostedBar
+import com.primaloptima.scribe.ui.components.ScribeTopBar
+import com.primaloptima.scribe.ui.components.ScribeBarAction
 import com.primaloptima.scribe.ui.theme.parseComposeColor
 import com.primaloptima.scribe.util.BitmapBlur
 import dev.chrisbanes.haze.hazeSource
@@ -68,6 +71,7 @@ import kotlinx.coroutines.withContext
 import com.primaloptima.scribe.util.DefaultThemes
 import com.primaloptima.scribe.util.SAFHelper
 import com.primaloptima.scribe.util.model.AppTheme
+import kotlinx.serialization.encodeToString
 import com.primaloptima.scribe.viewmodel.ThemeViewModel
 import java.io.File
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -85,7 +89,7 @@ fun ThemeEditScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val themes by vm.themes.observeAsState(emptyList())
+    val themes by vm.themes.collectAsStateWithLifecycle()
 
     val originalTheme = remember(themes, themeId) {
         themes.firstOrNull { it.id == themeId } ?: DefaultThemes.all.first()
@@ -177,68 +181,47 @@ fun ThemeEditScreen(
     Scaffold(
         contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
         topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent
-                ),
-                modifier = Modifier.frostedBar(hazeState),
-                title = {
-                    Text(
-                        if (originalTheme.builtIn) "View Theme" else "Edit Theme",
-                        fontWeight = FontWeight.Bold
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    IconButton(
-                        enabled = !originalTheme.builtIn && !isLuminancePending,
-                        onClick = {
-                        val updated = originalTheme.copy(
-                            name = name,
-                            fontSize = fontSize.toInt(),
-                            lineHeight = lineHeight,
-                            paragraphSpacing = paragraphSpacing.toInt(),
-                            paddingHorizontal = sideMargins.toInt(),
-                            fontFamily = fontFamily,
-                            backgroundImageUri = bgUri,
-                            backgroundImageOriginalUri = bgOriginalUri,
-                            backgroundImageOpacity = bgOpacity,
-                            bgMode = bgMode,
-                            blurIntensity = blurIntensity,
-                            frostedGlassEnabled = frostedGlassEnabled,
-                            frostedTintEnabled = frostedTintEnabled,
-                            frostedBlurRadius = frostedBlurRadius,
-                            textAlignment = textAlignment,
-                            themeScope = themeScope,
-                            emoji = emoji,
-                            savedBgLuminance = bgLuminance,
-                            colors = originalTheme.colors.copy(
-                                background = bgHex,
-                                surface = bgHex,
-                                text = textHex,
-                                accent = accentHex,
-                                toolbar = bgHex,
-                                toolbarText = textHex
+            ScribeTopBar(
+                title             = if (originalTheme.builtIn) "View Theme" else "Edit Theme",
+                navigationIcon    = Icons.AutoMirrored.Filled.ArrowBack,
+                onNavigationClick = onBack,
+                actions           = if (originalTheme.builtIn) emptyList() else listOf(
+                    ScribeBarAction(Icons.Default.Check, "Save") {
+                        if (!isLuminancePending) {
+                            val updated = originalTheme.copy(
+                                name = name,
+                                fontSize = fontSize.toInt(),
+                                lineHeight = lineHeight,
+                                paragraphSpacing = paragraphSpacing.toInt(),
+                                paddingHorizontal = sideMargins.toInt(),
+                                fontFamily = fontFamily,
+                                backgroundImageUri = bgUri,
+                                backgroundImageOriginalUri = bgOriginalUri,
+                                backgroundImageOpacity = bgOpacity,
+                                bgMode = bgMode,
+                                blurIntensity = blurIntensity,
+                                frostedGlassEnabled = frostedGlassEnabled,
+                                frostedTintEnabled = frostedTintEnabled,
+                                frostedBlurRadius = frostedBlurRadius,
+                                textAlignment = textAlignment,
+                                themeScope = themeScope,
+                                emoji = emoji,
+                                savedBgLuminance = bgLuminance,
+                                colors = originalTheme.colors.copy(
+                                    background = bgHex,
+                                    surface = bgHex,
+                                    text = textHex,
+                                    accent = accentHex,
+                                    toolbar = bgHex,
+                                    toolbarText = textHex
+                                )
                             )
-                        )
-                        vm.save(updated)
-                        Toast.makeText(context, "Theme saved", Toast.LENGTH_SHORT).show()
-                        onBack()
-                    }) {
-                        if (isLuminancePending) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Icon(Icons.Default.Check, contentDescription = "Save")
+                            vm.save(updated)
+                            Toast.makeText(context, "Theme saved", Toast.LENGTH_SHORT).show()
+                            onBack()
                         }
                     }
-                }
+                )
             )
         }
     ) { padding ->
@@ -587,7 +570,7 @@ fun ThemeEditScreen(
                             horizontalArrangement = Arrangement.SpaceEvenly
                         ) {
                             val alignOptions = listOf(
-                                "left" to Icons.Default.FormatAlignLeft,
+                                "left" to Icons.AutoMirrored.Filled.FormatAlignLeft,
                                 "justified" to Icons.Default.FormatAlignJustify,
                                 "center" to Icons.Default.FormatAlignCenter
                             )
@@ -1088,7 +1071,7 @@ private fun LivePreviewCard(
                 ) {
                     Icon(Icons.Default.FormatBold, contentDescription = null, tint = accentColor, modifier = Modifier.size(14.dp))
                     Icon(Icons.Default.FormatItalic, contentDescription = null, tint = textColor, modifier = Modifier.size(14.dp))
-                    Icon(Icons.Default.FormatListBulleted, contentDescription = null, tint = textColor, modifier = Modifier.size(14.dp))
+                    Icon(Icons.AutoMirrored.Filled.FormatListBulleted, contentDescription = null, tint = textColor, modifier = Modifier.size(14.dp))
                     Icon(Icons.Default.CheckCircle, contentDescription = null, tint = accentColor, modifier = Modifier.size(14.dp))
                 }
             }
@@ -1258,8 +1241,7 @@ private fun ColorPickerBottomSheet(
 
 private fun exportThemeJson(context: Context, theme: AppTheme) {
     try {
-        val gson = GsonBuilder().setPrettyPrinting().create()
-        val json = gson.toJson(theme)
+        val json = AppJson.encodeToString(theme)
         val fileName = "${theme.name.lowercase().replace(Regex("[^a-z0-9]"), "_")}_theme.json"
         val dir = File(context.cacheDir, "exported_themes").also { it.mkdirs() }
         val file = File(dir, fileName).also { it.writeText(json) }
