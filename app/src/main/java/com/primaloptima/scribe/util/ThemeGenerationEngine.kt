@@ -52,7 +52,7 @@ import kotlin.math.sqrt
  */
 object ThemeGenerationEngine {
 
-    const val ANALYSIS_SAMPLE_SIZE = 128
+    const val ANALYSIS_SAMPLE_SIZE = 256
     const val MAX_QUANTIZER_COLORS = 128
 
     // In-memory cache for deterministic session reuse of ImageUnderstanding (keyed by imageFingerprint or URI hash)
@@ -189,27 +189,36 @@ object ThemeGenerationEngine {
         val isOverallMonochrome = valid.all { it.chroma < 0.045 }
 
         // 1. PRIMARY ACCENT
-        // Balanced combination of MCU ranking and OKLCH chroma
+        // SOTA Chromatic Salience: Prioritizes vibrant focal points (e.g. glowing swords, neon trims, flowers)
+        // even when cropped into a low percentage of overall image pixels.
         val primaryCandidate = if (isOverallMonochrome) {
             // Special Case 45: Image without high chroma / monochrome / B&W
             // Pick candidate with best tone balance (mid-tone) and highest score or subtle undertone
             valid.maxByOrNull { it.score * 1.5 + (0.5 - abs(it.tone - 0.5)) }
                 ?: valid.first()
         } else {
-            valid.filter { it.chroma >= 0.06 && it.tone in 0.15..0.85 }
-                .maxByOrNull {
-                    val normScore = if (scored.isNotEmpty()) it.score / scored.size else 0.5
-                    val normChroma = (it.chroma / 0.25).coerceIn(0.0, 1.0)
-                    normScore * 0.6 + normChroma * 0.4
-                }
-                ?: valid.maxByOrNull { it.chroma }
-                ?: valid.first()
+            val chromatic = valid.filter { it.chroma >= 0.05 && it.tone in 0.10..0.90 }
+            if (chromatic.isNotEmpty()) {
+                chromatic.maxByOrNull { cand ->
+                    val normChroma = (cand.chroma / 0.28).coerceIn(0.0, 1.0)
+                    val tonalSuitability = (1.0 - 2.0 * (cand.tone - 0.5) * (cand.tone - 0.5)).coerceIn(0.25, 1.0)
+                    val logPop = kotlin.math.ln(cand.population.toDouble() + 2.0)
+                    val maxLogPop = kotlin.math.ln(totalPixels + 2.0).coerceAtLeast(1.0)
+                    val normPop = (logPop / maxLogPop).coerceIn(0.0, 1.0)
+                    val normScore = if (scored.isNotEmpty() && cand.score > 0) cand.score / scored.size else 0.0
+
+                    val chromaWeight = if (cand.chroma >= 0.10) 0.65 else 0.48
+                    (normChroma * chromaWeight * tonalSuitability) + (normPop * 0.22) + (normScore * 0.15)
+                } ?: chromatic.maxByOrNull { it.chroma } ?: valid.first()
+            } else {
+                valid.maxByOrNull { it.chroma } ?: valid.first()
+            }
         }
 
         // 2. ATMOSPHERIC
         // Candidate with high population representing the ambient canvas/environment
         val atmosphericCandidate = valid.filter { it.colorArgb != primaryCandidate.colorArgb }
-            .filter { it.chroma in 0.005..0.15 && it.tone in 0.08..0.92 }
+            .filter { it.chroma in 0.003..0.18 && it.tone in 0.06..0.94 }
             .maxByOrNull { it.population.toDouble() / totalPixels }
             ?: valid.filter { it.colorArgb != primaryCandidate.colorArgb }.maxByOrNull { it.population }
             ?: primaryCandidate
@@ -379,14 +388,14 @@ object ThemeGenerationEngine {
         val bgHex = String.format("#%06X", 0xFFFFFF and bgInt)
 
         // 2. Derive Accent (preserving seed hue and vibrant chroma, tuned for UI control visibility)
-        val accentTargetL = if (isDark) 0.72 else 0.45
+        val accentTargetL = if (isDark) 0.72 else 0.40
         val accentTargetC = maxOf(chroma, 0.12).coerceIn(0.08, 0.22)
         val accentOklch = ContrastResolver.Oklch(l = accentTargetL, c = accentTargetC, h = hue)
         val candidateAccentInt = ContrastResolver.oklchToColorInt(accentOklch)
         val resolvedAccent = ContrastResolver.resolveContrast(
             background = androidx.compose.ui.graphics.Color(bgInt),
             preferredForeground = androidx.compose.ui.graphics.Color(candidateAccentInt),
-            minRatio = 3.0,
+            minRatio = 3.2,
             role = ContrastResolver.ContrastRole.UI_CONTROL
         )
         val accentHex = String.format("#%06X", 0xFFFFFF and resolvedAccent.color.toArgb())
@@ -408,23 +417,23 @@ object ThemeGenerationEngine {
 
         // 4. Derive Harmonized Secondary & Tertiary Accents
         val secHue = (hue + 32.0) % 360.0
-        val secOklch = ContrastResolver.Oklch(l = if (isDark) 0.74 else 0.44, c = (chroma * 0.85).coerceIn(0.06, 0.20), h = secHue)
+        val secOklch = ContrastResolver.Oklch(l = if (isDark) 0.74 else 0.40, c = (chroma * 0.85).coerceIn(0.06, 0.20), h = secHue)
         val secInt = ContrastResolver.oklchToColorInt(secOklch)
         val resolvedSec = ContrastResolver.resolveContrast(
             background = androidx.compose.ui.graphics.Color(bgInt),
             preferredForeground = androidx.compose.ui.graphics.Color(secInt),
-            minRatio = 3.0,
+            minRatio = 3.2,
             role = ContrastResolver.ContrastRole.UI_CONTROL
         )
         val secHex = String.format("#%06X", 0xFFFFFF and resolvedSec.color.toArgb())
 
         val tertHue = (hue - 28.0 + 360.0) % 360.0
-        val tertOklch = ContrastResolver.Oklch(l = if (isDark) 0.76 else 0.46, c = (chroma * 0.75).coerceIn(0.05, 0.18), h = tertHue)
+        val tertOklch = ContrastResolver.Oklch(l = if (isDark) 0.76 else 0.42, c = (chroma * 0.75).coerceIn(0.05, 0.18), h = tertHue)
         val tertInt = ContrastResolver.oklchToColorInt(tertOklch)
         val resolvedTert = ContrastResolver.resolveContrast(
             background = androidx.compose.ui.graphics.Color(bgInt),
             preferredForeground = androidx.compose.ui.graphics.Color(tertInt),
-            minRatio = 3.0,
+            minRatio = 3.2,
             role = ContrastResolver.ContrastRole.UI_CONTROL
         )
         val tertHex = String.format("#%06X", 0xFFFFFF and resolvedTert.color.toArgb())
@@ -515,18 +524,94 @@ object ThemeGenerationEngine {
             return fallbackUnderstanding()
         }
 
-        // 1. Ranked candidates via MCU QuantizerCelebi & Score (computed once)
+        // 1. SOTA Multi-Chromatic Candidate Extraction: QuantizerCelebi + Salience + Distinct Hue Clustering
         val quantizerResult = QuantizerCelebi.quantize(pixels, MAX_QUANTIZER_COLORS)
         val scored = Score.score(quantizerResult)
-        val extracted = scored.ifEmpty { quantizerResult.keys.toList() }
-        val accessibleCandidates = extracted.filter {
-            val oklch = ContrastResolver.colorToOklch(it)
-            oklch.l in 0.04..0.985
+
+        // Structure raw candidate metrics in OKLCH
+        data class SalientCandidate(
+            val colorArgb: Int,
+            val oklch: ContrastResolver.Oklch,
+            val population: Int,
+            val score: Double,
+            val salience: Double
+        )
+
+        val totalPx = pixels.size.toDouble().coerceAtLeast(1.0)
+        val maxPop = quantizerResult.values.maxOrNull()?.toDouble()?.coerceAtLeast(1.0) ?: 1.0
+
+        val salienceList = quantizerResult.mapNotNull { (colorInt, pop) ->
+            val oklch = ContrastResolver.colorToOklch(colorInt)
+            // Filter extreme black/white noise
+            if (oklch.l !in 0.04..0.985) return@mapNotNull null
+
+            val scoreIdx = scored.indexOf(colorInt)
+            val score = if (scoreIdx >= 0) (scored.size - scoreIdx).toDouble() else 0.0
+
+            // Perceptual salience: Chroma vibrancy (focal pop) * tone suitability * log-population
+            val normChroma = (oklch.c / 0.28).coerceIn(0.0, 1.0)
+            val tonalFactor = (1.0 - 2.0 * (oklch.l - 0.5) * (oklch.l - 0.5)).coerceIn(0.25, 1.0)
+            val logPop = kotlin.math.ln(pop.toDouble() + 2.0)
+            val maxLogPop = kotlin.math.ln(totalPx + 2.0).coerceAtLeast(1.0)
+            val normPop = (logPop / maxLogPop).coerceIn(0.0, 1.0)
+            val chromaBoost = if (oklch.c >= 0.10) 1.45 else if (oklch.c >= 0.06) 1.20 else 0.85
+
+            val salience = (normChroma * 0.60 * chromaBoost * tonalFactor) + (normPop * 0.25) + ((score / (scored.size.coerceAtLeast(1))) * 0.15)
+
+            SalientCandidate(colorInt, oklch, pop, score, salience)
         }
-        val rankedCandidates = if (accessibleCandidates.isNotEmpty()) {
-            accessibleCandidates
-        } else if (extracted.isNotEmpty()) {
-            extracted
+
+        // Distinct hue clustering: 12 sectors around 360-degree circle
+        val hueClusters = salienceList
+            .filter { it.oklch.c >= 0.04 }
+            .groupBy { ((it.oklch.h % 360.0 + 360.0) % 360.0 / 30.0).toInt().coerceIn(0, 11) }
+            .mapValues { (_, candidatesInSector) -> candidatesInSector.maxByOrNull { it.salience }!! }
+            .values
+            .sortedByDescending { it.salience }
+
+        // Assemble ordered candidate pool:
+        // A. Top chromatic salience (ensures focal accents e.g. glowing swords are #1)
+        // B. MCU scored colors
+        // C. Distinct hue representatives
+        // D. Atmospheric candidate (high population ambient color)
+        val candidatePool = mutableListOf<SalientCandidate>()
+
+        salienceList.maxByOrNull { it.salience }?.let { candidatePool.add(it) }
+
+        scored.forEach { sc ->
+            salienceList.firstOrNull { it.colorArgb == sc }?.let { candidatePool.add(it) }
+        }
+
+        candidatePool.addAll(hueClusters)
+
+        salienceList.filter { it.oklch.c in 0.003..0.18 && it.oklch.l in 0.08..0.92 }
+            .maxByOrNull { it.population }
+            ?.let { candidatePool.add(it) }
+
+        salienceList.maxByOrNull { it.population }?.let { candidatePool.add(it) }
+
+        // Deduplicate with perceptual difference guarantees:
+        // Color must differ by >= 18 deg hue OR >= 0.12 tone OR >= 0.06 chroma
+        val finalRanked = mutableListOf<SalientCandidate>()
+        for (cand in candidatePool) {
+            val isDuplicate = finalRanked.any { existing ->
+                val dHue = circularHueDistance(cand.oklch.h, existing.oklch.h)
+                val dTone = abs(cand.oklch.l - existing.oklch.l)
+                val dChroma = abs(cand.oklch.c - existing.oklch.c)
+                (dHue < 18.0 && dTone < 0.12 && dChroma < 0.06)
+            }
+            if (!isDuplicate) {
+                finalRanked.add(cand)
+            }
+            if (finalRanked.size >= 12) break
+        }
+
+        val rankedCandidates = if (finalRanked.isNotEmpty()) {
+            finalRanked.map { it.colorArgb }
+        } else if (scored.isNotEmpty()) {
+            scored
+        } else if (quantizerResult.isNotEmpty()) {
+            quantizerResult.keys.toList()
         } else {
             listOf(0xFF3B82F6.toInt(), 0xFF1D4ED8.toInt(), 0xFF10B981.toInt(), 0xFFF59E0B.toInt())
         }
@@ -1191,15 +1276,15 @@ object ThemeGenerationEngine {
 
         // 6. VISUAL PRIMARY ACCENT - Primary action / FAB / active triggers
         val (accentL, accentC) = when (recipe) {
-            ThemeGenerationRecipe.BALANCED -> Pair(if (effectiveIsDark) 0.72 else 0.45, (primaryChroma * accentScale).coerceIn(0.09, 0.23))
-            ThemeGenerationRecipe.ATMOSPHERIC -> Pair(if (effectiveIsDark) 0.74 else 0.43, (primaryChroma * 1.15 * accentScale).coerceIn(0.10, 0.25))
-            ThemeGenerationRecipe.INK -> Pair(if (effectiveIsDark) 0.70 else 0.46, (primaryChroma * 0.90 * accentScale).coerceIn(0.07, 0.20))
-            ThemeGenerationRecipe.EXPRESSIVE -> Pair(if (effectiveIsDark) 0.76 else 0.42, (primaryChroma * 1.35 * accentScale).coerceIn(0.14, 0.28))
+            ThemeGenerationRecipe.BALANCED -> Pair(if (effectiveIsDark) 0.72 else 0.40, (primaryChroma * accentScale).coerceIn(0.09, 0.23))
+            ThemeGenerationRecipe.ATMOSPHERIC -> Pair(if (effectiveIsDark) 0.74 else 0.38, (primaryChroma * 1.15 * accentScale).coerceIn(0.10, 0.25))
+            ThemeGenerationRecipe.INK -> Pair(if (effectiveIsDark) 0.70 else 0.40, (primaryChroma * 0.90 * accentScale).coerceIn(0.07, 0.20))
+            ThemeGenerationRecipe.EXPRESSIVE -> Pair(if (effectiveIsDark) 0.76 else 0.36, (primaryChroma * 1.35 * accentScale).coerceIn(0.14, 0.28))
         }
         val resolvedPrimaryAccent = ContrastResolver.resolveContrast(
             background = Color(canvasInt),
             preferredForeground = Color(ContrastResolver.oklchToColorInt(ContrastResolver.Oklch(accentL, accentC, primaryHue))),
-            minRatio = 3.0,
+            minRatio = 3.2,
             role = ContrastResolver.ContrastRole.UI_CONTROL
         )
         val primaryAccentHex = String.format("#%06X", 0xFFFFFF and resolvedPrimaryAccent.color.toArgb())
@@ -1227,8 +1312,8 @@ object ThemeGenerationEngine {
         }
         val resolvedSecondaryAccent = ContrastResolver.resolveContrast(
             background = Color(canvasInt),
-            preferredForeground = Color(ContrastResolver.oklchToColorInt(ContrastResolver.Oklch(if (effectiveIsDark) 0.74 else 0.44, secAccentC, secAccentHue))),
-            minRatio = 3.0,
+            preferredForeground = Color(ContrastResolver.oklchToColorInt(ContrastResolver.Oklch(if (effectiveIsDark) 0.74 else 0.40, secAccentC, secAccentHue))),
+            minRatio = 3.2,
             role = ContrastResolver.ContrastRole.UI_CONTROL
         )
         val secondaryAccentHex = String.format("#%06X", 0xFFFFFF and resolvedSecondaryAccent.color.toArgb())
@@ -1246,8 +1331,8 @@ object ThemeGenerationEngine {
         }
         val resolvedTertiaryAccent = ContrastResolver.resolveContrast(
             background = Color(canvasInt),
-            preferredForeground = Color(ContrastResolver.oklchToColorInt(ContrastResolver.Oklch(if (effectiveIsDark) 0.76 else 0.46, tertAccentC, tertAccentHue))),
-            minRatio = 3.0,
+            preferredForeground = Color(ContrastResolver.oklchToColorInt(ContrastResolver.Oklch(if (effectiveIsDark) 0.76 else 0.42, tertAccentC, tertAccentHue))),
+            minRatio = 3.2,
             role = ContrastResolver.ContrastRole.UI_CONTROL
         )
         val tertiaryAccentHex = String.format("#%06X", 0xFFFFFF and resolvedTertiaryAccent.color.toArgb())

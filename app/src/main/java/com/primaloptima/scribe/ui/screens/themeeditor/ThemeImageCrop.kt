@@ -110,22 +110,108 @@ suspend fun computeBgAnalysis(context: Context, imageUri: String): BgAnalysisRes
 }
 
 /**
- * Loads [imageUri] through Coil at software sample resolution and derives a structured [ImageUnderstanding].
+ * Decodes a downscaled software [Bitmap] directly from [imageUri] (content or file URI)
+ * targeting [targetMaxDim] on its longest edge. Preserves exact aspect ratio and fine details
+ * without hardware bitmap or Coil execution failures.
+ */
+private fun decodeSoftwareBitmap(context: Context, imageUri: String, targetMaxDim: Int = 384): Bitmap? {
+    val openStream: () -> java.io.InputStream? = {
+        try {
+            when {
+                imageUri.startsWith("content://") -> context.contentResolver.openInputStream(Uri.parse(imageUri))
+                imageUri.startsWith("file://") -> {
+                    val path = Uri.parse(imageUri).path
+                    if (path != null) java.io.FileInputStream(java.io.File(path)) else null
+                }
+                imageUri.startsWith("/") -> java.io.FileInputStream(java.io.File(imageUri))
+                else -> context.contentResolver.openInputStream(Uri.parse(imageUri))
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    // 1. Probe dimensions
+    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    openStream()?.use { stream ->
+        BitmapFactory.decodeStream(stream, null, options)
+    } ?: return null
+
+    val rawW = options.outWidth
+    val rawH = options.outHeight
+    if (rawW <= 0 || rawH <= 0) return null
+
+    // 2. Compute sample size (power-of-2 approximation)
+    var sampleSize = 1
+    val maxDim = maxOf(rawW, rawH)
+    while (maxDim / (sampleSize * 2) >= targetMaxDim) {
+        sampleSize *= 2
+    }
+
+    // 3. Decode software ARGB_8888 bitmap
+    val decodeOptions = BitmapFactory.Options().apply {
+        inSampleSize = sampleSize
+        inPreferredConfig = Bitmap.Config.ARGB_8888
+    }
+    return openStream()?.use { stream ->
+        BitmapFactory.decodeStream(stream, null, decodeOptions)
+    }
+}
+
+/**
+ * Loads [imageUri] at high software fidelity and derives a structured [ImageUnderstanding].
+ * Employs direct stream decoding first with aspect-ratio-aware sampling, falling back to
+ * Coil 3 software decoding if necessary.
  */
 suspend fun computeImageUnderstanding(context: Context, imageUri: String): ImageUnderstanding {
     return withContext(Dispatchers.IO) {
         try {
+            // Stage 1: High-fidelity direct decode (preserves fine lines, glowing accents, and non-square aspect ratios)
+            val directBitmap = decodeSoftwareBitmap(context, imageUri, targetMaxDim = 384)
+            if (directBitmap != null) {
+                try {
+                    val swBitmap = if (directBitmap.config == Bitmap.Config.HARDWARE) {
+                        directBitmap.copy(Bitmap.Config.ARGB_8888, false)
+                    } else {
+                        directBitmap
+                    }
+                    if (swBitmap != null) {
+                        val understanding = ThemeGenerationEngine.analyzeImage(swBitmap)
+                        if (swBitmap !== directBitmap) swBitmap.recycle()
+                        directBitmap.recycle()
+                        return@withContext understanding
+                    }
+                } catch (_: Exception) {
+                    // proceed to fallback
+                } finally {
+                    if (!directBitmap.isRecycled) directBitmap.recycle()
+                }
+            }
+
+            // Stage 2: Coil loader fallback with generous 384x384 target bounds
             val request = ImageRequest.Builder(context)
                 .data(imageUri)
-                .size(coil3.size.Size(128, 128))
+                .size(coil3.size.Size(384, 384))
                 .allowHardware(false)
                 .build()
-            val bitmap = (ImageLoader(context).execute(request) as? SuccessResult)
+            val coilBitmap = (ImageLoader(context).execute(request) as? SuccessResult)
                 ?.image
                 ?.let { (it as? BitmapImage)?.bitmap }
-                ?: return@withContext ThemeGenerationEngine.fallbackUnderstanding()
 
-            ThemeGenerationEngine.analyzeImage(bitmap)
+            if (coilBitmap != null) {
+                val swBitmap = if (coilBitmap.config == Bitmap.Config.HARDWARE) {
+                    coilBitmap.copy(Bitmap.Config.ARGB_8888, false)
+                } else {
+                    coilBitmap
+                }
+                if (swBitmap != null) {
+                    val understanding = ThemeGenerationEngine.analyzeImage(swBitmap)
+                    if (swBitmap !== coilBitmap) swBitmap.recycle()
+                    return@withContext understanding
+                }
+            }
+
+            ThemeGenerationEngine.fallbackUnderstanding()
         } catch (_: Exception) {
             ThemeGenerationEngine.fallbackUnderstanding()
         }
