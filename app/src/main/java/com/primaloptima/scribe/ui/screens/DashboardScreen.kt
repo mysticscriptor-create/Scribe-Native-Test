@@ -520,8 +520,8 @@ private fun CurrentProjectCard(
                     ) {
                         val tagAccents = listOf(
                             accentColor,
-                            ScribeTheme.colors.brand.secondary,
-                            ScribeTheme.colors.brand.tertiary
+                            ScribeTheme.colors.interaction.secondary,
+                            ScribeTheme.colors.interaction.tertiary
                         )
                         PLACEHOLDER_TAGS.forEachIndexed { idx, tag ->
                             val tagColor = tagAccents[idx % tagAccents.size]
@@ -681,8 +681,8 @@ private fun QuickActionsCard(
     onOpenSheets: () -> Unit,
     onGoToBooks: () -> Unit
 ) {
-    val secondaryColor = ScribeTheme.colors.brand.secondary
-    val tertiaryColor  = ScribeTheme.colors.brand.tertiary
+    val secondaryColor = ScribeTheme.colors.interaction.secondary
+    val tertiaryColor  = ScribeTheme.colors.interaction.tertiary
     val statsColor     = ScribeTheme.colors.analytics.series1
 
     val actions = listOf(
@@ -861,10 +861,10 @@ private fun WritingProgressCard(
                 value     = "$streak",
                 subLabel  = "days",
                 icon      = Icons.Outlined.LocalFireDepartment,
-                iconTint  = ScribeTheme.colors.brand.secondary,
+                iconTint  = ScribeTheme.colors.interaction.secondary,
                 extra     = {
                     Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                        val streakWarningColor = ScribeTheme.colors.brand.secondary
+                        val streakWarningColor = ScribeTheme.colors.interaction.secondary
                         streakDots.forEach { (_, hasWords) ->
                             Box(
                                 modifier = Modifier
@@ -888,7 +888,7 @@ private fun WritingProgressCard(
                 value     = "${(monthProgress * 100).toInt()}%",
                 subLabel  = "${formatWordCount(monthWritten)} written",
                 icon      = Icons.Outlined.TrackChanges,
-                iconTint  = ScribeTheme.colors.brand.tertiary,
+                iconTint  = ScribeTheme.colors.interaction.tertiary,
                 extra     = {
                     val monthProgressColor = if (monthProgress >= 1f) ScribeTheme.colors.analytics.positive else ScribeTheme.colors.analytics.series1
                     ScribeProgressBar(
@@ -952,7 +952,7 @@ private fun WritingProgressCard(
             ) {
                 Icon(Icons.Outlined.StarBorder, null,
                     modifier = Modifier.size(14.dp),
-                    tint     = ScribeTheme.colors.brand.secondary)
+                    tint     = ScribeTheme.colors.interaction.secondary)
                 Text(
                     "Next Milestone",
                     fontSize   = 12.sp,

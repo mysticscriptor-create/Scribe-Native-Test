@@ -70,6 +70,7 @@ import com.primaloptima.scribe.ui.theme.FrostedDialog
 import com.primaloptima.scribe.ui.theme.FrostedDropdownMenu
 import com.primaloptima.scribe.ui.theme.frostedContainerColor
 import com.primaloptima.scribe.ui.theme.LocalAppTheme
+import dev.chrisbanes.haze.hazeSource
 import com.primaloptima.scribe.ui.theme.ScribeColorScheme
 import com.primaloptima.scribe.engine.ProseDiagnosticProvider
 import com.primaloptima.scribe.engine.ProseInlayHintProvider
@@ -511,13 +512,13 @@ fun MainEditorScreen(
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
                                 .fillMaxSize()
-                                .hazeSource(state = hazeState)
+                                .then(if (hazeState != null) Modifier.hazeSource(state = hazeState) else Modifier)
                         )
                         val isOverlayActive = (activeTheme?.overlayEnabled == true || (activeTheme?.overlayColor != null && bgOpacity > 0f)) && bgOpacity > 0f
                         if (isOverlayActive) {
                             val tintBaseColor = activeTheme?.overlayColor?.let {
                                 runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull()
-                            } ?: currentThemeBg
+                            } ?: ScribeTheme.colors.surfaces.background
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()

@@ -396,7 +396,7 @@ fun HomeScreen(
                         DrawerNavItem(
                             icon = Icons.Default.Map,
                             label = "World Sheets",
-                            accentColor = ScribeTheme.colors.brand.secondary,
+                            accentColor = ScribeTheme.colors.interaction.secondary,
                             onClick = {
                                 scope.launch { drawerState.close() }
                                 onOpenSheets()
@@ -419,7 +419,7 @@ fun HomeScreen(
                         DrawerNavItem(
                             icon = Icons.Default.Palette,
                             label = "Themes",
-                            accentColor = ScribeTheme.colors.brand.tertiary,
+                            accentColor = ScribeTheme.colors.interaction.tertiary,
                             onClick = {
                                 scope.launch { drawerState.close() }
                                 onOpenThemes()
@@ -870,7 +870,7 @@ private fun DrawerNavItem(
         Box(
             modifier = Modifier
                 .size(32.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(ScribeTheme.shapes.small)
                 .background(accentColor.copy(alpha = 0.12f)),
             contentAlignment = Alignment.Center
         ) {

@@ -72,7 +72,17 @@ import com.primaloptima.scribe.ui.theme.LocalAppTheme
 import com.primaloptima.scribe.ui.theme.LocalHazeState
 import com.primaloptima.scribe.ui.theme.ScribeComposeTheme
 import com.primaloptima.scribe.ui.theme.ScribeTheme
+import com.primaloptima.scribe.util.ThemeManager
 import com.primaloptima.scribe.util.model.AppTheme
+
+private fun parseComposeColor(hex: String?, fallback: Color): Color {
+    if (hex.isNullOrBlank()) return fallback
+    return try {
+        Color(ThemeManager.parseColor(hex))
+    } catch (_: Exception) {
+        fallback
+    }
+}
 import com.primaloptima.scribe.util.model.ThemeColors
 import dev.chrisbanes.haze.HazeState
 import kotlin.math.roundToInt
