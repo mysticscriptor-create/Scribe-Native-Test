@@ -61,7 +61,10 @@ enum class ColorPickerTarget {
     ERROR,
 
     // Surface Overrides
-    SURFACE
+    SURFACE,
+
+    // Overlay Tint Override
+    OVERLAY
 }
 
 /**
@@ -100,6 +103,8 @@ data class ThemeEditorDraft(
     val bgUri: String?,
     val bgOriginalUri: String?,
     val bgOpacity: Float,
+    val overlayEnabled: Boolean = false,
+    val overlayColor: String? = null,
     val blurIntensity: Float,
     val frostedGlassEnabled: Boolean,
     val frostedTintEnabled: Boolean,
@@ -254,6 +259,8 @@ data class ThemeEditorDraft(
         if (bgMode != original.bgMode) return true
         if (bgUri != original.backgroundImageUri) return true
         if (bgOpacity != (original.backgroundImageOpacity ?: 0.35f)) return true
+        if (overlayEnabled != original.overlayEnabled) return true
+        if (overlayColor != original.overlayColor) return true
         if (blurIntensity != original.blurIntensity) return true
         if (frostedGlassEnabled != original.frostedGlassEnabled) return true
         if (frostedTintEnabled != original.frostedTintEnabled) return true
@@ -482,6 +489,8 @@ data class ThemeEditorDraft(
             backgroundImageUri = bgUri,
             backgroundImageOriginalUri = bgOriginalUri,
             backgroundImageOpacity = bgOpacity,
+            overlayEnabled = overlayEnabled,
+            overlayColor = overlayColor,
             blurIntensity = blurIntensity,
             frostedGlassEnabled = frostedGlassEnabled,
             frostedTintEnabled = frostedTintEnabled,
@@ -531,6 +540,8 @@ data class ThemeEditorDraft(
                 bgUri = theme.backgroundImageUri,
                 bgOriginalUri = theme.backgroundImageOriginalUri,
                 bgOpacity = theme.backgroundImageOpacity ?: 0.35f,
+                overlayEnabled = theme.overlayEnabled,
+                overlayColor = theme.overlayColor,
                 blurIntensity = theme.blurIntensity,
                 frostedGlassEnabled = theme.frostedGlassEnabled,
                 frostedTintEnabled = theme.frostedTintEnabled,

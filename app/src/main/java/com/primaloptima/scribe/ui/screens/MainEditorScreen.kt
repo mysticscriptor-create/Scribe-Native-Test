@@ -504,6 +504,28 @@ fun MainEditorScreen(
                         .fillMaxSize()
                         .padding(padding)
                 ) {
+                    if (isEditorOnlyBg && !bgUri.isNullOrEmpty()) {
+                        AsyncImage(
+                            model = bgUri,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .hazeSource(state = hazeState)
+                        )
+                        val isOverlayActive = (activeTheme?.overlayEnabled == true || (activeTheme?.overlayColor != null && bgOpacity > 0f)) && bgOpacity > 0f
+                        if (isOverlayActive) {
+                            val tintBaseColor = activeTheme?.overlayColor?.let {
+                                runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull()
+                            } ?: currentThemeBg
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(tintBaseColor.copy(alpha = bgOpacity))
+                            )
+                        }
+                    }
+
                     // Drive Sora's searcher from find state
                     LaunchedEffect(findQuery, showFindBar) {
                         val editor = soraEditorRef ?: return@LaunchedEffect

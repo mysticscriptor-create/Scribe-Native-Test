@@ -221,6 +221,8 @@ fun ThemeEditScreen(
                                 bgMode = draft.bgMode,
                                 bgUri = draft.bgUri,
                                 bgOpacity = draft.bgOpacity,
+                                overlayEnabled = draft.overlayEnabled,
+                                overlayColor = draft.overlayColor,
                                 blurIntensity = draft.blurIntensity,
                                 frostedGlassEnabled = draft.frostedGlassEnabled,
                                 frostedTintEnabled = draft.frostedTintEnabled,
@@ -360,6 +362,8 @@ fun ThemeEditScreen(
                                                 bgMode = draft.bgMode,
                                                 bgUri = draft.bgUri,
                                                 bgOpacity = draft.bgOpacity,
+                                                overlayEnabled = draft.overlayEnabled,
+                                                overlayColor = draft.overlayColor,
                                                 blurIntensity = draft.blurIntensity,
                                                 frostedGlassEnabled = draft.frostedGlassEnabled,
                                                 frostedTintEnabled = draft.frostedTintEnabled,
@@ -437,6 +441,7 @@ fun ThemeEditScreen(
                     ColorPickerTarget.WARNING -> "Warning Status Color"
                     ColorPickerTarget.ERROR -> "Error Status Color"
                     ColorPickerTarget.SURFACE -> "Surface Color"
+                    ColorPickerTarget.OVERLAY -> "Overlay Tint Color"
                 }
 
                 val currentHex = when (target) {
@@ -454,6 +459,7 @@ fun ThemeEditScreen(
                     ColorPickerTarget.WARNING -> resolvedColors.warning
                     ColorPickerTarget.ERROR -> resolvedColors.error
                     ColorPickerTarget.SURFACE -> resolvedColors.surface
+                    ColorPickerTarget.OVERLAY -> draft.overlayColor ?: draft.bgHex
                 }
 
                 ColorPickerBottomSheet(
@@ -465,6 +471,7 @@ fun ThemeEditScreen(
                             ColorPickerTarget.BACKGROUND -> draft = draft.copy(bgHex = newHex)
                             ColorPickerTarget.TEXT -> draft = draft.copy(textHex = newHex)
                             ColorPickerTarget.ACCENT -> draft = draft.copy(accentHex = newHex)
+                            ColorPickerTarget.OVERLAY -> draft = draft.copy(overlayColor = newHex)
                             else -> draft = draft.withOverride(target, newHex)
                         }
                     }
@@ -726,6 +733,9 @@ private fun ActiveInspectorContent(
                 bgUri = draft.bgUri,
                 bgOriginalUri = draft.bgOriginalUri,
                 bgOpacity = draft.bgOpacity,
+                overlayEnabled = draft.overlayEnabled,
+                overlayColor = draft.overlayColor,
+                bgHex = draft.bgHex,
                 blurIntensity = draft.blurIntensity,
                 frostedGlassEnabled = draft.frostedGlassEnabled,
                 frostedTintEnabled = draft.frostedTintEnabled,
@@ -748,6 +758,8 @@ private fun ActiveInspectorContent(
                     )
                 },
                 onBgModeChange = { onDraftChange(draft.copy(bgMode = it)) },
+                onOverlayEnabledChange = { onDraftChange(draft.copy(overlayEnabled = it)) },
+                onOverlayColorClick = { onSelectTarget(ColorPickerTarget.OVERLAY) },
                 onBgOpacityChange = { onDraftChange(draft.copy(bgOpacity = it)) },
                 onBlurIntensityChange = { onDraftChange(draft.copy(blurIntensity = it)) },
                 onFrostedGlassEnabledChange = { onDraftChange(draft.copy(frostedGlassEnabled = it)) },

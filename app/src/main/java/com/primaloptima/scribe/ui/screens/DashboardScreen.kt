@@ -518,19 +518,25 @@ private fun CurrentProjectCard(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         modifier = Modifier.basicMarquee()
                     ) {
-                        PLACEHOLDER_TAGS.forEach { tag ->
+                        val tagAccents = listOf(
+                            accentColor,
+                            ScribeTheme.colors.brand.secondary,
+                            ScribeTheme.colors.brand.tertiary
+                        )
+                        PLACEHOLDER_TAGS.forEachIndexed { idx, tag ->
+                            val tagColor = tagAccents[idx % tagAccents.size]
                             Box(
                                 modifier = Modifier
                                     .clip(ScribeTheme.shapes.chip)
-                                    .background(accentColor.copy(alpha = 0.09f))
-                                    .border(0.5.dp, accentColor.copy(alpha = 0.18f), ScribeTheme.shapes.chip)
+                                    .background(tagColor.copy(alpha = 0.09f))
+                                    .border(0.5.dp, tagColor.copy(alpha = 0.22f), ScribeTheme.shapes.chip)
                                     .padding(horizontal = 8.dp, vertical = 3.dp)
                             ) {
                                 Text(
                                     text       = tag,
                                     fontSize   = 11.sp,
                                     lineHeight = 11.sp,
-                                    color      = accentColor.copy(alpha = 0.85f),
+                                    color      = tagColor.copy(alpha = 0.90f),
                                     fontWeight = FontWeight.Medium
                                 )
                             }
@@ -675,15 +681,20 @@ private fun QuickActionsCard(
     onOpenSheets: () -> Unit,
     onGoToBooks: () -> Unit
 ) {
+    val secondaryColor = ScribeTheme.colors.brand.secondary
+    val tertiaryColor  = ScribeTheme.colors.brand.tertiary
+    val statsColor     = ScribeTheme.colors.analytics.series1
+
     val actions = listOf(
-        Triple(Icons.Outlined.Edit,               "Write",      {
+        // Icon, Label, Tile Accent, Action
+        listOf(Icons.Outlined.Edit,        "Write",      accentColor,    {
             val latest = chapters.firstOrNull()
             if (latest != null) onOpenNote(latest.id, latest.bookId) else onGoToBooks()
         }),
-        Triple(Icons.Outlined.AccountTree,        "Outline",    { onOpenBook() }),
-        Triple(Icons.Outlined.People,             "Characters", { onOpenBook() }),
-        Triple(Icons.Outlined.Explore,            "World",      { onOpenSheets() }),
-        Triple(Icons.Outlined.BarChart,           "Stats",      { onGoToStats() })
+        listOf(Icons.Outlined.AccountTree, "Outline",    secondaryColor, { onOpenBook() }),
+        listOf(Icons.Outlined.People,      "Characters", secondaryColor, { onOpenBook() }),
+        listOf(Icons.Outlined.Explore,     "World",      tertiaryColor,  { onOpenSheets() }),
+        listOf(Icons.Outlined.BarChart,    "Stats",      statsColor,     { onGoToStats() })
     )
 
     ScribeContentCard(
@@ -698,12 +709,17 @@ private fun QuickActionsCard(
                 .padding(horizontal = 10.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            actions.forEachIndexed { index, (icon, label, action) ->
+            actions.forEachIndexed { index, item ->
+                val icon = item[0] as ImageVector
+                val label = item[1] as String
+                val tileAccent = item[2] as Color
+                val action = item[3] as () -> Unit
+
                 UniformActionTile(
                     icon        = icon,
                     label       = label,
                     onClick     = action,
-                    accentColor = accentColor,
+                    accentColor = tileAccent,
                     isFirst     = index == 0,
                     modifier    = Modifier
                         .weight(1f)
@@ -740,8 +756,8 @@ private fun UniformActionTile(
         accentColor.copy(alpha = 0.14f)
     else
         frostedContainerColor(
-            fallback = if (hasBgImage) solidSurface.copy(alpha = 0.70f)
-                       else MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+            fallback = if (hasBgImage) solidSurface.copy(alpha = 0.75f)
+                       else MaterialTheme.colorScheme.surfaceContainerHigh
         )
 
     Box(
@@ -751,8 +767,8 @@ private fun UniformActionTile(
             .background(bgColor)
             .border(
                 width = 0.6.dp,
-                color = if (isFirst) accentColor.copy(alpha = 0.25f)
-                        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                color = if (isFirst) accentColor.copy(alpha = 0.28f)
+                        else accentColor.copy(alpha = 0.18f),
                 shape = shape
             )
             .clickable(interactionSource = interactionSource, indication = null) { onClick() },
@@ -767,14 +783,14 @@ private fun UniformActionTile(
                 imageVector        = icon,
                 contentDescription = label,
                 modifier           = Modifier.size(20.dp),
-                tint               = if (isFirst) accentColor else ScribeTheme.colors.content.secondary
+                tint               = accentColor
             )
             Spacer(modifier = Modifier.height(5.dp))
             Text(
                 text       = label,
                 fontSize   = 10.sp,
                 fontWeight = FontWeight.SemiBold,
-                color      = if (isFirst) accentColor else ScribeTheme.colors.content.secondary,
+                color      = if (isFirst) accentColor else ScribeTheme.colors.content.primary,
                 maxLines   = 1
             )
         }
@@ -833,6 +849,7 @@ private fun WritingProgressCard(
                 value     = formatWordCount(todayWords),
                 subLabel  = "/ ${formatWordCount(dailyGoal)} words",
                 icon      = Icons.Outlined.Edit,
+                iconTint  = accentColor,
                 badge     = if (goalMet) "Goal reached! 🎉" else null
             )
 
@@ -844,10 +861,10 @@ private fun WritingProgressCard(
                 value     = "$streak",
                 subLabel  = "days",
                 icon      = Icons.Outlined.LocalFireDepartment,
-                iconTint  = ScribeTheme.colors.analytics.warning,
+                iconTint  = ScribeTheme.colors.brand.secondary,
                 extra     = {
                     Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                        val streakWarningColor = ScribeTheme.colors.analytics.warning
+                        val streakWarningColor = ScribeTheme.colors.brand.secondary
                         streakDots.forEach { (_, hasWords) ->
                             Box(
                                 modifier = Modifier
@@ -871,6 +888,7 @@ private fun WritingProgressCard(
                 value     = "${(monthProgress * 100).toInt()}%",
                 subLabel  = "${formatWordCount(monthWritten)} written",
                 icon      = Icons.Outlined.TrackChanges,
+                iconTint  = ScribeTheme.colors.brand.tertiary,
                 extra     = {
                     val monthProgressColor = if (monthProgress >= 1f) ScribeTheme.colors.analytics.positive else ScribeTheme.colors.analytics.series1
                     ScribeProgressBar(
@@ -934,7 +952,7 @@ private fun WritingProgressCard(
             ) {
                 Icon(Icons.Outlined.StarBorder, null,
                     modifier = Modifier.size(14.dp),
-                    tint     = contentSecondary)
+                    tint     = ScribeTheme.colors.brand.secondary)
                 Text(
                     "Next Milestone",
                     fontSize   = 12.sp,

@@ -396,7 +396,7 @@ fun HomeScreen(
                         DrawerNavItem(
                             icon = Icons.Default.Map,
                             label = "World Sheets",
-                            accentColor = accentColor,
+                            accentColor = ScribeTheme.colors.brand.secondary,
                             onClick = {
                                 scope.launch { drawerState.close() }
                                 onOpenSheets()
@@ -419,7 +419,7 @@ fun HomeScreen(
                         DrawerNavItem(
                             icon = Icons.Default.Palette,
                             label = "Themes",
-                            accentColor = accentColor,
+                            accentColor = ScribeTheme.colors.brand.tertiary,
                             onClick = {
                                 scope.launch { drawerState.close() }
                                 onOpenThemes()
@@ -864,19 +864,29 @@ private fun DrawerNavItem(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            modifier = Modifier.size(20.dp),
-            tint = ScribeTheme.colors.content.secondary
-        )
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(accentColor.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = accentColor
+            )
+        }
         Spacer(modifier = Modifier.width(14.dp))
         Text(
             text = label,
-            fontSize = 15.sp
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Medium,
+            color = ScribeTheme.colors.content.primary
         )
     }
 }

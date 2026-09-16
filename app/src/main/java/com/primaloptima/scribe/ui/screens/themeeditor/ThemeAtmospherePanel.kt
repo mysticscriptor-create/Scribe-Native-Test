@@ -1,6 +1,10 @@
 package com.primaloptima.scribe.ui.screens.themeeditor
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
@@ -9,10 +13,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.primaloptima.scribe.ui.theme.ScribeTheme
+import com.primaloptima.scribe.ui.theme.parseComposeColor
 
 /**
  * Inspector panel for Atmosphere, Background Images, Blur, and Glassmorphic effects.
@@ -23,6 +31,9 @@ fun ThemeAtmospherePanel(
     bgUri: String?,
     bgOriginalUri: String?,
     bgOpacity: Float,
+    overlayEnabled: Boolean,
+    overlayColor: String?,
+    bgHex: String,
     blurIntensity: Float,
     frostedGlassEnabled: Boolean,
     frostedTintEnabled: Boolean,
@@ -31,6 +42,8 @@ fun ThemeAtmospherePanel(
     onCropImage: () -> Unit,
     onRemoveImage: () -> Unit,
     onBgModeChange: (String) -> Unit,
+    onOverlayEnabledChange: (Boolean) -> Unit,
+    onOverlayColorClick: () -> Unit,
     onBgOpacityChange: (Float) -> Unit,
     onBlurIntensityChange: (Float) -> Unit,
     onFrostedGlassEnabledChange: (Boolean) -> Unit,
@@ -184,31 +197,115 @@ fun ThemeAtmospherePanel(
                         }
                     }
 
-                    // Overlay Opacity Slider
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
+                    // Contrast & Tint Overlay Toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                             Text("Contrast Darkening Overlay", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                            Surface(
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                shape = ScribeTheme.shapes.extraSmall
+                            Text(
+                                "Tints background artwork to ensure optimal reading contrast",
+                                fontSize = 11.sp,
+                                color = ScribeTheme.colors.content.secondary
+                            )
+                        }
+                        Switch(
+                            checked = overlayEnabled,
+                            onCheckedChange = onOverlayEnabledChange
+                        )
+                    }
+
+                    if (overlayEnabled) {
+                        val activeOverlayHex = overlayColor ?: bgHex
+                        val activeOverlayColor = parseComposeColor(activeOverlayHex, MaterialTheme.colorScheme.surface)
+
+                        // Color Picker Swatch Row
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(ScribeTheme.shapes.cardSmall)
+                                .clickable { onOverlayColorClick() },
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            shape = ScribeTheme.shapes.cardSmall,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, ScribeTheme.colors.borders.subtle)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text(
-                                    text = "${(bgOpacity * 100).toInt()}%",
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(activeOverlayColor)
+                                            .border(1.5.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                                    )
+                                    Column {
+                                        Text(
+                                            text = "Overlay Tint Color",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = ScribeTheme.colors.content.primary
+                                        )
+                                        Text(
+                                            text = if (overlayColor != null) "Custom Tint" else "Theme Background Default",
+                                            fontSize = 11.sp,
+                                            color = ScribeTheme.colors.content.secondary
+                                        )
+                                    }
+                                }
+
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                    shape = ScribeTheme.shapes.extraSmall
+                                ) {
+                                    Text(
+                                        text = activeOverlayHex.uppercase(),
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
                             }
                         }
-                        Slider(
-                            value = bgOpacity,
-                            onValueChange = onBgOpacityChange,
-                            valueRange = 0f..0.90f
-                        )
+
+                        // Overlay Opacity Slider
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Overlay Opacity", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    shape = ScribeTheme.shapes.extraSmall
+                                ) {
+                                    Text(
+                                        text = "${(bgOpacity * 100).toInt()}%",
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                            Slider(
+                                value = bgOpacity,
+                                onValueChange = onBgOpacityChange,
+                                valueRange = 0f..0.95f
+                            )
+                        }
                     }
                 }
             }

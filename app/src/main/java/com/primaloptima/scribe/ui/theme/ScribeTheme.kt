@@ -3318,13 +3318,14 @@ fun ScribeComposeTheme(
                                     // here either.
                                     .hazeSource(state = hazeState)
                             )
-                            // Only apply the colour tint overlay in "blurred" mode.
-                            // In "image" mode the user wants the image as-is — no wash.
-                            if (bgMode == "blurred" && bgOpacity > 0f) {
+                            // Apply contrast darkening overlay when overlayEnabled is true and opacity > 0
+                            val isOverlayActive = (resolvedTheme.overlayEnabled || (resolvedTheme.overlayColor != null && bgOpacity > 0f)) && bgOpacity > 0f
+                            if (isOverlayActive) {
+                                val tintBaseColor = resolvedTheme.overlayColor?.let { parseComposeColor(it, bg) } ?: bg
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .background(bg.copy(alpha = bgOpacity))
+                                        .background(tintBaseColor.copy(alpha = bgOpacity))
                                 )
                             }
                         }

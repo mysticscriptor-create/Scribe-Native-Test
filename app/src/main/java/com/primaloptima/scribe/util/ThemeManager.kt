@@ -429,6 +429,8 @@ class ThemeManager(private val context: Context) {
                 blurIntensity = theme.blurIntensity.coerceIn(0f, 100f),
                 frostedBlurRadius = theme.frostedBlurRadius.coerceIn(0f, 100f),
                 backgroundImageOpacity = theme.backgroundImageOpacity?.coerceIn(0f, 1f) ?: 0.35f,
+                overlayEnabled = theme.overlayEnabled,
+                overlayColor = theme.overlayColor?.let { if (isValidHexColor(it)) sanitizeHexColor(it, it) else null },
                 textAlignment = if (theme.textAlignment in listOf("left", "justified", "center")) theme.textAlignment else "left",
                 themeScope = if (theme.themeScope in listOf("whole_app", "editor_only")) theme.themeScope else "whole_app"
             )

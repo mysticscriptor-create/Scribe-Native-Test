@@ -70,6 +70,13 @@ import com.primaloptima.scribe.ui.theme.localHasBgImage
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 
+enum class ScribeElevationTier {
+    Lowest,  // surfaceContainerLowest (sunken / editor canvas)
+    Base,    // surface / surfaceContainer (standard content cards)
+    Raised,  // surfaceContainerHigh (nested cards, elevated items, chips, active items)
+    Overlay  // surfaceContainerHighest (popups, dialogs, dropdowns, floating panels)
+}
+
 object ScribeCardTokens {
     // Corner radii
     val RadiusLarge: Dp  = ScribeShapeTokens.RadiusExtraLarge // content cards, project cards (20.dp)
@@ -129,6 +136,8 @@ fun ScribeCard(
     shape: androidx.compose.ui.graphics.Shape? = null,
     onClick: (() -> Unit)? = null,
     shine: Boolean = true,
+    elevationTier: ScribeElevationTier = ScribeElevationTier.Base,
+    containerColorOverride: Color? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
     val hazeState    = LocalHazeState.current
@@ -151,9 +160,16 @@ fun ScribeCard(
         label         = "card-press-scale"
     )
 
-    val containerColor = frostedContainerColor(
-        fallback = if (hasBgImage) solidSurface.copy(alpha = 0.82f)
-                   else MaterialTheme.colorScheme.surface
+    val defaultSolidFallback = when (elevationTier) {
+        ScribeElevationTier.Lowest  -> MaterialTheme.colorScheme.surfaceContainerLowest
+        ScribeElevationTier.Base    -> MaterialTheme.colorScheme.surface
+        ScribeElevationTier.Raised  -> MaterialTheme.colorScheme.surfaceContainerHigh
+        ScribeElevationTier.Overlay -> MaterialTheme.colorScheme.surfaceContainerHighest
+    }
+
+    val containerColor = containerColorOverride ?: frostedContainerColor(
+        fallback = if (hasBgImage) solidSurface.copy(alpha = if (elevationTier == ScribeElevationTier.Raised) 0.88f else 0.82f)
+                   else defaultSolidFallback
     )
 
     Box(
@@ -236,6 +252,8 @@ fun ScribeContentCard(
     cornerRadius: Dp = ScribeCardTokens.RadiusLarge,
     shape: androidx.compose.ui.graphics.Shape? = null,
     onClick: (() -> Unit)? = null,
+    elevationTier: ScribeElevationTier = ScribeElevationTier.Base,
+    containerColorOverride: Color? = null,
     // Legacy parameters — kept so DashboardScreen does not need changes.
     // For new screens, use headerTrailing instead.
     actionLabel: String? = null,
@@ -268,11 +286,13 @@ fun ScribeContentCard(
     }
 
     ScribeCard(
-        modifier     = modifier,
-        cornerRadius = cornerRadius,
-        shape        = shape,
-        onClick      = onClick,
-        shine        = true,
+        modifier               = modifier,
+        cornerRadius           = cornerRadius,
+        shape                  = shape,
+        onClick                = onClick,
+        shine                  = true,
+        elevationTier          = elevationTier,
+        containerColorOverride = containerColorOverride,
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
 
@@ -386,7 +406,9 @@ fun ScribeStripCard(
     showDivider: Boolean = false,
     wrapInCard: Boolean = true,
     cornerRadius: Dp = ScribeCardTokens.RadiusMedium,
-    shape: androidx.compose.ui.graphics.Shape? = null
+    shape: androidx.compose.ui.graphics.Shape? = null,
+    elevationTier: ScribeElevationTier = ScribeElevationTier.Base,
+    containerColorOverride: Color? = null
 ) {
     val contentPrimary = ScribeTheme.colors.content.primary
     val contentSecondary = ScribeTheme.colors.content.secondary
@@ -472,11 +494,13 @@ fun ScribeStripCard(
 
     if (wrapInCard) {
         ScribeCard(
-            modifier     = modifier,
-            cornerRadius = cornerRadius,
-            shape        = shape,
-            onClick      = onClick,
-            shine        = true
+            modifier               = modifier,
+            cornerRadius           = cornerRadius,
+            shape                  = shape,
+            onClick                = onClick,
+            shine                  = true,
+            elevationTier          = elevationTier,
+            containerColorOverride = containerColorOverride
         ) {
             // When wrapInCard = true, ScribeCard already handles the click,
             // so we pass null to StripRow to avoid double-handling
@@ -572,10 +596,12 @@ fun ScribeActionTile(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     isPrimary: Boolean = false,
+    accentColor: Color? = null,
+    elevationTier: ScribeElevationTier = ScribeElevationTier.Raised,
     shape: androidx.compose.ui.graphics.Shape? = null,
     badge: (@Composable BoxScope.() -> Unit)? = null
 ) {
-    val accentColor  = ScribeTheme.colors.interaction.primary
+    val activeAccent = accentColor ?: ScribeTheme.colors.interaction.primary
     val hazeState    = LocalHazeState.current
     val hasBgImage   = localHasBgImage()
     val solidSurface = LocalSolidSurface.current
@@ -590,10 +616,17 @@ fun ScribeActionTile(
         label         = "tile-press"
     )
 
-    val containerColor = if (isPrimary) accentColor
+    val defaultSolidFallback = when (elevationTier) {
+        ScribeElevationTier.Lowest  -> MaterialTheme.colorScheme.surfaceContainerLowest
+        ScribeElevationTier.Base    -> MaterialTheme.colorScheme.surface
+        ScribeElevationTier.Raised  -> MaterialTheme.colorScheme.surfaceContainerHigh
+        ScribeElevationTier.Overlay -> MaterialTheme.colorScheme.surfaceContainerHighest
+    }
+
+    val containerColor = if (isPrimary) activeAccent
     else frostedContainerColor(
         fallback = if (hasBgImage) solidSurface.copy(alpha = 0.80f)
-                   else MaterialTheme.colorScheme.surface
+                   else defaultSolidFallback
     )
 
     Box(
@@ -630,7 +663,7 @@ fun ScribeActionTile(
                         imageVector        = icon,
                         contentDescription = label,
                         modifier           = Modifier.size(ScribeTheme.metrics.iconNormal),
-                        tint               = if (isPrimary) onPrimary else accentColor
+                        tint               = if (isPrimary) onPrimary else activeAccent
                     )
                 }
                 Spacer(modifier = Modifier.height(6.dp))

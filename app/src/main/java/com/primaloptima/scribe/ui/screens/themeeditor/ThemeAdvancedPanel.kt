@@ -180,7 +180,7 @@ fun ThemeAdvancedPanel(
             }
         }
 
-        // ── 2. THEME SCOPE ─────────────────────────────────────────────────────
+        // ── 2. ARTWORK DISPLAY SCOPE ─────────────────────────────────────────
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = ScribeTheme.shapes.themeEditorSection,
@@ -196,7 +196,7 @@ fun ThemeAdvancedPanel(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Theme Application Scope",
+                        text = "Artwork Display Scope",
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp,
                         color = ScribeTheme.colors.content.primary
@@ -216,12 +216,12 @@ fun ThemeAdvancedPanel(
                 }
 
                 val scopes = listOf(
-                    Pair("all", "Whole App (Global UI, navigation chrome, and writing canvas)"),
-                    Pair("editor", "Writing Canvas Only (App UI retains default theme)")
+                    Pair("whole_app", "Whole App"),
+                    Pair("editor_only", "Editor Only")
                 )
 
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    scopes.forEach { (key, desc) ->
+                    scopes.forEach { (key, label) ->
                         val isSelected = themeScope == key
                         Card(
                             modifier = Modifier
@@ -250,11 +250,10 @@ fun ThemeAdvancedPanel(
                                     onClick = { onThemeScopeChange(key) }
                                 )
                                 Text(
-                                    text = desc,
-                                    fontSize = 13.sp,
-                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                    color = if (isSelected) ScribeTheme.colors.content.primary else ScribeTheme.colors.content.secondary,
-                                    lineHeight = 16.sp
+                                    text = label,
+                                    fontSize = 14.sp,
+                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                    color = if (isSelected) ScribeTheme.colors.content.primary else ScribeTheme.colors.content.secondary
                                 )
                             }
                         }

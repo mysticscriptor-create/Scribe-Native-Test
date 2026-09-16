@@ -323,6 +323,8 @@ data class AppTheme(
      *  the crop can be re-run at a different screen ratio if needed. */
     val backgroundImageOriginalUri: String? = null,
     val backgroundImageOpacity: Float? = 0.35f,
+    val overlayEnabled: Boolean = false,
+    val overlayColor: String? = null,
     val bgMode: String = "color", // "color" | "image" | "blurred"
     val blurIntensity: Float = 15f,
     val frostedGlassEnabled: Boolean = true,
