@@ -8,6 +8,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -1843,7 +1844,7 @@ fun EditorAccessoryDrawer(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.TopCenter)
-                .padding(horizontal = 12.dp, top = 8.dp)
+                .padding(start = 12.dp, end = 12.dp, top = 8.dp)
         ) {
             Surface(
                 shape = CircleShape,

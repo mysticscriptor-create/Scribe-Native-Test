@@ -74,6 +74,9 @@ import com.primaloptima.scribe.ui.theme.ScribeComposeTheme
 import com.primaloptima.scribe.ui.theme.ScribeTheme
 import com.primaloptima.scribe.util.ThemeManager
 import com.primaloptima.scribe.util.model.AppTheme
+import com.primaloptima.scribe.util.model.ThemeColors
+import dev.chrisbanes.haze.HazeState
+import kotlin.math.roundToInt
 
 private fun parseComposeColor(hex: String?, fallback: Color): Color {
     if (hex.isNullOrBlank()) return fallback
@@ -83,9 +86,6 @@ private fun parseComposeColor(hex: String?, fallback: Color): Color {
         fallback
     }
 }
-import com.primaloptima.scribe.util.model.ThemeColors
-import dev.chrisbanes.haze.HazeState
-import kotlin.math.roundToInt
 
 /**
  * Preview pane presentation mode selector.
