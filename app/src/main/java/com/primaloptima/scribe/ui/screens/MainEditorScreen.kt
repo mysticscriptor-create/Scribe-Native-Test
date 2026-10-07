@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -1773,7 +1774,7 @@ fun EditorAccessoryDrawer(
         ) {
             Surface(
                 shape = CircleShape,
-                color = ScribeTheme.colors.surface.card.copy(alpha = 0.94f),
+                color = ScribeTheme.colors.surface.surfaceRaised.copy(alpha = 0.94f),
                 border = BorderStroke(0.75.dp, ScribeTheme.colors.content.secondary.copy(alpha = 0.2f)),
                 shadowElevation = 4.dp
             ) {
@@ -1846,7 +1847,7 @@ fun EditorAccessoryDrawer(
         ) {
             Surface(
                 shape = CircleShape,
-                color = ScribeTheme.colors.surface.card.copy(alpha = 0.96f),
+                color = ScribeTheme.colors.surface.surfaceRaised.copy(alpha = 0.96f),
                 border = BorderStroke(1.dp, ScribeTheme.colors.interaction.primary.copy(alpha = 0.35f)),
                 shadowElevation = 4.dp,
                 modifier = Modifier
@@ -1927,7 +1928,7 @@ fun DrawerSnippetCard(
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(12.dp),
-        color = ScribeTheme.colors.surface.card.copy(alpha = 0.72f),
+        color = ScribeTheme.colors.surface.surfaceRaised.copy(alpha = 0.72f),
         border = BorderStroke(0.5.dp, ScribeTheme.colors.content.secondary.copy(alpha = 0.14f)),
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -1988,7 +1989,7 @@ fun DrawerTemplateCard(
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(12.dp),
-        color = ScribeTheme.colors.surface.card.copy(alpha = 0.72f),
+        color = ScribeTheme.colors.surface.surfaceRaised.copy(alpha = 0.72f),
         border = BorderStroke(0.5.dp, ScribeTheme.colors.content.secondary.copy(alpha = 0.14f)),
         modifier = Modifier.fillMaxWidth()
     ) {
