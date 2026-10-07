@@ -15,8 +15,10 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
@@ -97,6 +99,7 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -116,6 +119,7 @@ import com.primaloptima.scribe.viewmodel.BookViewModel
 import com.primaloptima.scribe.viewmodel.EditorViewModel
 import com.primaloptima.scribe.viewmodel.NoteListViewModel
 import com.primaloptima.scribe.viewmodel.ShortcutsViewModel
+import com.primaloptima.scribe.util.model.ShortcutAction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -239,6 +243,15 @@ fun MainEditorScreen(
     var showRenameDialog     by remember { mutableStateOf(false) }
     var showCreateNoteDialog by remember { mutableStateOf(false) }
     var showEditorTray       by remember { mutableStateOf(false) }
+
+    var activeDrawerMode     by remember { mutableStateOf<EditorDrawerMode?>(null) }
+    val activeBarShortcuts   = remember(shortcuts) { shortcuts.filter { it.itemType == "shortcut" } }
+    val snippets             = remember(shortcuts) { shortcuts.filter { it.itemType == "snippet" } }
+    val templates            = remember(shortcuts) { shortcuts.filter { it.itemType == "template" } }
+
+    BackHandler(enabled = activeDrawerMode != null) {
+        activeDrawerMode = null
+    }
 
     val dataStore = remember { (context.applicationContext as? ScribeApp)?.dataStore ?: ScribeDataStore(context) }
     val selectedOrnamentId by dataStore.manuscriptOrnamentIdFlow.collectAsStateWithLifecycle("classic_diamond")
@@ -462,37 +475,100 @@ fun MainEditorScreen(
                 bottomBar = {
                     CompositionLocalProvider(LocalOneShotBitmap provides barBlurBitmap) {
                         val registerBounds = LocalInteractiveBoundsRegistry.current
-                        DisposableEffect(isKeyboardVisible) {
+                        DisposableEffect(isKeyboardVisible, activeDrawerMode) {
                             onDispose { registerBounds("shortcut_bar", null) }
                         }
 
                         AnimatedVisibility(
-                            visible = isKeyboardVisible,
+                            visible = isKeyboardVisible || activeDrawerMode != null,
                             enter   = slideInVertically(initialOffsetY = { it }),
                             exit    = slideOutVertically(targetOffsetY = { it })
                         ) {
-                            Row(
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .frostedBar(hazeState)
                                     .imePadding()
-                                    .onGloballyPositioned { coords ->
-                                        if (isKeyboardVisible) {
-                                            registerBounds("shortcut_bar", coords.boundsInRoot())
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .frostedBar(hazeState)
+                                        .onGloballyPositioned { coords ->
+                                            if (isKeyboardVisible || activeDrawerMode != null) {
+                                                registerBounds("shortcut_bar", coords.boundsInRoot())
+                                            }
+                                        }
+                                        .horizontalScroll(rememberScrollState())
+                                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment     = Alignment.CenterVertically
+                                ) {
+                                    // Tmpl Pill
+                                    DrawerPillButton(
+                                        label = "Tmpl",
+                                        icon = Icons.Default.Article,
+                                        isActive = activeDrawerMode == EditorDrawerMode.TEMPLATES,
+                                        onClick = {
+                                            activeDrawerMode = if (activeDrawerMode == EditorDrawerMode.TEMPLATES) null else EditorDrawerMode.TEMPLATES
+                                        }
+                                    )
+
+                                    // Snip Pill
+                                    DrawerPillButton(
+                                        label = "Snip",
+                                        icon = Icons.Default.ContentPaste,
+                                        isActive = activeDrawerMode == EditorDrawerMode.SNIPPETS,
+                                        onClick = {
+                                            activeDrawerMode = if (activeDrawerMode == EditorDrawerMode.SNIPPETS) null else EditorDrawerMode.SNIPPETS
+                                        }
+                                    )
+
+                                    VerticalDivider(
+                                        modifier = Modifier
+                                            .height(18.dp)
+                                            .padding(horizontal = 2.dp),
+                                        color = ScribeTheme.colors.content.secondary.copy(alpha = 0.25f)
+                                    )
+
+                                    activeBarShortcuts.forEach { shortcut ->
+                                        FormatButton(label = shortcut.label) {
+                                            when (shortcut.kind) {
+                                                "wrap" -> soraEditorRef?.applyFormat(shortcut.payload, shortcut.closing ?: shortcut.payload)
+                                                "pair" -> soraEditorRef?.applyFormat(shortcut.payload, shortcut.closing ?: "")
+                                                else   -> soraEditorRef?.insertAtCursor(shortcut.payload)
+                                            }
                                         }
                                     }
-                                    .horizontalScroll(rememberScrollState())
-                                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment     = Alignment.CenterVertically
-                            ) {
-                                shortcuts.forEach { shortcut ->
-                                    FormatButton(label = shortcut.label) {
-                                        when (shortcut.kind) {
-                                            "wrap" -> soraEditorRef?.applyFormat(shortcut.payload, shortcut.closing ?: shortcut.payload)
-                                            "pair" -> soraEditorRef?.applyFormat(shortcut.payload, shortcut.closing ?: "")
-                                            else   -> soraEditorRef?.insertAtCursor(shortcut.payload)
-                                        }
+                                }
+
+                                AnimatedVisibility(
+                                    visible = activeDrawerMode != null,
+                                    enter = expandVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
+                                    exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) + fadeOut()
+                                ) {
+                                    val currentMode = activeDrawerMode
+                                    if (currentMode != null) {
+                                        EditorAccessoryDrawer(
+                                            mode = currentMode,
+                                            items = if (currentMode == EditorDrawerMode.SNIPPETS) snippets else templates,
+                                            onSelectItem = { item ->
+                                                when (item.kind) {
+                                                    "wrap" -> soraEditorRef?.applyFormat(item.payload, item.closing ?: item.payload)
+                                                    "pair" -> soraEditorRef?.applyFormat(item.payload, item.closing ?: "")
+                                                    else   -> soraEditorRef?.insertAtCursor(item.payload)
+                                                }
+                                                soraEditorRef?.requestFocus()
+                                            },
+                                            onOpenSettings = {
+                                                activeDrawerMode = null
+                                                onOpenShortcuts()
+                                            },
+                                            onToggleKeyboard = {
+                                                activeDrawerMode = null
+                                                soraEditorRef?.requestFocus()
+                                            },
+                                            hazeState = hazeState
+                                        )
                                     }
                                 }
                             }
@@ -1547,6 +1623,421 @@ fun FormatButton(
             modifier         = Modifier.padding(horizontal = ScribeTheme.spacing.medium, vertical = ScribeTheme.spacing.micro)
         ) {
             Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+// ── Editor Accessory Drawer & Shortcuts System ───────────────────────────────────
+
+enum class EditorDrawerMode {
+    SNIPPETS,
+    TEMPLATES
+}
+
+@Composable
+fun DrawerPillButton(
+    label: String,
+    icon: ImageVector,
+    isActive: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = if (isActive) ScribeTheme.colors.interaction.primary
+                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
+        contentColor = if (isActive) MaterialTheme.colorScheme.onPrimary
+                       else MaterialTheme.colorScheme.onSurfaceVariant,
+        border = if (isActive) null else BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+        modifier = Modifier.height(ScribeTheme.metrics.chipHeight)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(13.dp)
+            )
+            Spacer(Modifier.width(5.dp))
+            Text(
+                text = label,
+                fontSize = 12.sp,
+                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+fun EditorAccessoryDrawer(
+    mode: EditorDrawerMode,
+    items: List<ShortcutAction>,
+    onSelectItem: (ShortcutAction) -> Unit,
+    onOpenSettings: () -> Unit,
+    onToggleKeyboard: () -> Unit,
+    hazeState: dev.chrisbanes.haze.HazeState?,
+    modifier: Modifier = Modifier
+) {
+    val listState = rememberLazyListState()
+    var isSearchExpanded by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+
+    // Scroll tracking: chip shrinks / fades out when scrolling down; smoothly reappears when scrolling back up
+    var isScrollingUp by remember { mutableStateOf(true) }
+    var previousIndex by remember { mutableIntStateOf(0) }
+    var previousScrollOffset by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
+        val currentIndex = listState.firstVisibleItemIndex
+        val currentOffset = listState.firstVisibleItemScrollOffset
+
+        if (currentIndex == 0 && currentOffset <= 5) {
+            isScrollingUp = true
+        } else if (currentIndex > previousIndex || (currentIndex == previousIndex && currentOffset > previousScrollOffset + 8)) {
+            isScrollingUp = false
+        } else if (currentIndex < previousIndex || (currentIndex == previousIndex && currentOffset < previousScrollOffset - 8)) {
+            isScrollingUp = true
+        }
+        previousIndex = currentIndex
+        previousScrollOffset = currentOffset
+    }
+
+    val filteredItems = remember(items, searchQuery) {
+        if (searchQuery.isBlank()) items
+        else items.filter {
+            it.label.contains(searchQuery, ignoreCase = true) ||
+            it.description.contains(searchQuery, ignoreCase = true) ||
+            it.keywords.any { k -> k.contains(searchQuery, ignoreCase = true) } ||
+            it.payload.contains(searchQuery, ignoreCase = true)
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(260.dp)
+            .frostedBar(hazeState)
+    ) {
+        // Content Layer - takes maximum space, scrolls behind top-right floating chip
+        if (filteredItems.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = if (searchQuery.isNotBlank()) "No matching ${if (mode == EditorDrawerMode.SNIPPETS) "snippets" else "templates"} found"
+                           else "No ${if (mode == EditorDrawerMode.SNIPPETS) "snippets" else "templates"} available",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = ScribeTheme.colors.content.secondary
+                )
+            }
+        } else {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    start = 12.dp,
+                    end = 12.dp,
+                    top = if (isSearchExpanded) 52.dp else 8.dp,
+                    bottom = 12.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                items(filteredItems, key = { it.id }) { item ->
+                    if (mode == EditorDrawerMode.SNIPPETS) {
+                        DrawerSnippetCard(
+                            snippet = item,
+                            onClick = { onSelectItem(item) }
+                        )
+                    } else {
+                        DrawerTemplateCard(
+                            template = item,
+                            onClick = { onSelectItem(item) }
+                        )
+                    }
+                }
+            }
+        }
+
+        // Floating Top-Right 3-Icon Chip (when not searching)
+        AnimatedVisibility(
+            visible = !isSearchExpanded && isScrollingUp,
+            enter = fadeIn(animationSpec = tween(180)) + scaleIn(initialScale = 0.8f, animationSpec = tween(180)),
+            exit = fadeOut(animationSpec = tween(180)) + scaleOut(targetScale = 0.8f, animationSpec = tween(180)),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(end = 12.dp, top = 8.dp)
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = ScribeTheme.colors.surface.card.copy(alpha = 0.94f),
+                border = BorderStroke(0.75.dp, ScribeTheme.colors.content.secondary.copy(alpha = 0.2f)),
+                shadowElevation = 4.dp
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                ) {
+                    IconButton(
+                        onClick = { isSearchExpanded = true },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Search",
+                            tint = ScribeTheme.colors.content.primary,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .height(14.dp)
+                            .background(ScribeTheme.colors.content.secondary.copy(alpha = 0.25f))
+                    )
+
+                    IconButton(
+                        onClick = onOpenSettings,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Shortcuts Settings",
+                            tint = ScribeTheme.colors.content.secondary,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .height(14.dp)
+                            .background(ScribeTheme.colors.content.secondary.copy(alpha = 0.25f))
+                    )
+
+                    IconButton(
+                        onClick = onToggleKeyboard,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Keyboard,
+                            contentDescription = "Keyboard",
+                            tint = ScribeTheme.colors.content.secondary,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Morphed Search Bar (when user clicks Search icon)
+        AnimatedVisibility(
+            visible = isSearchExpanded,
+            enter = fadeIn(animationSpec = tween(200)) + expandHorizontally(expandFrom = Alignment.End, animationSpec = spring(stiffness = Spring.StiffnessMediumLow)),
+            exit = fadeOut(animationSpec = tween(150)) + shrinkHorizontally(shrinkTowards = Alignment.End, animationSpec = tween(150)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.TopCenter)
+                .padding(horizontal = 12.dp, top = 8.dp)
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = ScribeTheme.colors.surface.card.copy(alpha = 0.96f),
+                border = BorderStroke(1.dp, ScribeTheme.colors.interaction.primary.copy(alpha = 0.35f)),
+                shadowElevation = 4.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(38.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = null,
+                        tint = ScribeTheme.colors.interaction.primary,
+                        modifier = Modifier.size(17.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    BasicTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                            color = ScribeTheme.colors.content.primary
+                        ),
+                        cursorBrush = SolidColor(ScribeTheme.colors.interaction.primary),
+                        modifier = Modifier.weight(1f),
+                        decorationBox = { innerTextField ->
+                            if (searchQuery.isEmpty()) {
+                                Text(
+                                    text = if (mode == EditorDrawerMode.SNIPPETS) "Search snippets..." else "Search templates...",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = ScribeTheme.colors.content.secondary.copy(alpha = 0.5f)
+                                )
+                            }
+                            innerTextField()
+                        }
+                    )
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(
+                            onClick = { searchQuery = "" },
+                            modifier = Modifier.size(26.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Clear",
+                                tint = ScribeTheme.colors.content.secondary,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
+                    IconButton(
+                        onClick = {
+                            searchQuery = ""
+                            isSearchExpanded = false
+                        },
+                        modifier = Modifier.size(26.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close search",
+                            tint = ScribeTheme.colors.content.primary,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DrawerSnippetCard(
+    snippet: ShortcutAction,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        color = ScribeTheme.colors.surface.card.copy(alpha = 0.72f),
+        border = BorderStroke(0.5.dp, ScribeTheme.colors.content.secondary.copy(alpha = 0.14f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(ScribeTheme.colors.interaction.primary.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ContentPaste,
+                    contentDescription = null,
+                    tint = ScribeTheme.colors.interaction.primary,
+                    modifier = Modifier.size(17.dp)
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = snippet.label,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = ScribeTheme.colors.content.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (snippet.description.isNotBlank()) {
+                    Text(
+                        text = snippet.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ScribeTheme.colors.content.secondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                } else if (snippet.payload.isNotBlank()) {
+                    Text(
+                        text = snippet.payload.trim().replace("\n", " "),
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        color = ScribeTheme.colors.content.secondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DrawerTemplateCard(
+    template: ShortcutAction,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        color = ScribeTheme.colors.surface.card.copy(alpha = 0.72f),
+        border = BorderStroke(0.5.dp, ScribeTheme.colors.content.secondary.copy(alpha = 0.14f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(ScribeTheme.colors.interaction.primary.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Article,
+                    contentDescription = null,
+                    tint = ScribeTheme.colors.interaction.primary,
+                    modifier = Modifier.size(19.dp)
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = template.label,
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = ScribeTheme.colors.content.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (template.description.isNotBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = template.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ScribeTheme.colors.content.secondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = template.payload.trim().lines().take(3).joinToString(" • "),
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = ScribeTheme.colors.content.secondary.copy(alpha = 0.75f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }

@@ -14,10 +14,15 @@ data class ShortcutAction(
     val id: String,
     val label: String,
     /** "insert" | "wrap" | "pair" */
-    val kind: String,
-    val payload: String,
+    val kind: String = "insert",
+    val payload: String = "",
     /** Non-null for wrap/pair */
-    val closing: String? = null
+    val closing: String? = null,
+    val itemType: String = "shortcut", // "shortcut" | "snippet" | "template"
+    val category: String = "General",
+    val icon: String = "",
+    val keywords: List<String> = emptyList(),
+    val description: String = ""
 )
 
 // ── Pinned item ───────────────────────────────────────────────────────────────

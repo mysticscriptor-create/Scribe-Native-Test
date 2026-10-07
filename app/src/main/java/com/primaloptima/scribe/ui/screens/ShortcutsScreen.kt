@@ -186,7 +186,7 @@ private fun ShortcutRow(
 
     ScribeStripCard(
         title = shortcut.label,
-        subtitle = "Kind: ${shortcut.kind} • Payload: ${shortcut.payload}",
+        subtitle = "${shortcut.itemType.replaceFirstChar { it.uppercase() }} • ${if (shortcut.description.isNotBlank()) shortcut.description else shortcut.payload.take(35).replace("\n", " ")}",
         leading = {
             Box(
                 modifier = Modifier
@@ -197,7 +197,11 @@ private fun ShortcutRow(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    Icons.AutoMirrored.Filled.ShortText,
+                    when (shortcut.itemType) {
+                        "template" -> Icons.Default.Article
+                        "snippet" -> Icons.Default.ContentPaste
+                        else -> Icons.AutoMirrored.Filled.ShortText
+                    },
                     contentDescription = null,
                     tint = accentColor,
                     modifier = Modifier.size(20.dp)
@@ -282,9 +286,15 @@ private fun EditShortcutDialog(
             TextButton(
                 onClick = {
                     if (label.isNotBlank() && payload.isNotBlank()) {
+                        val base = existing ?: ShortcutAction(
+                            id = System.currentTimeMillis().toString(),
+                            label = label.trim(),
+                            kind = kind,
+                            payload = payload,
+                            closing = closing.ifBlank { null }
+                        )
                         onSave(
-                            ShortcutAction(
-                                id = existing?.id ?: System.currentTimeMillis().toString(),
+                            base.copy(
                                 label = label.trim(),
                                 kind = kind,
                                 payload = payload,

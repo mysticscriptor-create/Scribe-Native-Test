@@ -175,10 +175,20 @@ class ScribeDataStore(private val context: Context) {
         store.data.first()[EXTERNAL_ROOT_JSON]
 
     suspend fun getShortcuts(): List<ShortcutAction> {
-        val json = store.data.first()[SHORTCUTS_JSON] ?: return DefaultShortcuts.all
+        val allDefaults = DefaultShortcuts.all + DefaultShortcuts.defaultSnippets + DefaultShortcuts.defaultTemplates
+        val json = store.data.first()[SHORTCUTS_JSON] ?: return allDefaults
         return try {
-            AppJson.decodeFromString<List<ShortcutAction>>(json)
-        } catch (_: Exception) { DefaultShortcuts.all }
+            val list = AppJson.decodeFromString<List<ShortcutAction>>(json)
+            val existingIds = list.map { it.id }.toSet()
+            val missingDefaults = allDefaults.filter { it.id !in existingIds }
+            if (missingDefaults.isNotEmpty()) {
+                list + missingDefaults
+            } else {
+                list
+            }
+        } catch (_: Exception) {
+            allDefaults
+        }
     }
 
     suspend fun getBookGoal(bookId: String): BookGoal {

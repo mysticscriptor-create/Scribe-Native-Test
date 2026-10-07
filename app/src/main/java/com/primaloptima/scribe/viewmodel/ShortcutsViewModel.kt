@@ -52,7 +52,9 @@ class ShortcutsViewModel(application: Application) : AndroidViewModel(applicatio
         save(list)
     }
 
-    fun resetToDefaults() { save(DefaultShortcuts.all) }
+    fun resetToDefaults() {
+        save(DefaultShortcuts.all + DefaultShortcuts.defaultSnippets + DefaultShortcuts.defaultTemplates)
+    }
 
     private fun save(list: List<ShortcutAction>) {
         _shortcuts.value = list
