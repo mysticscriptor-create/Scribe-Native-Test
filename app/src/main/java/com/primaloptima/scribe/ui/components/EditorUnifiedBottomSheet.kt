@@ -1907,9 +1907,9 @@ private fun TypographyAlignmentControl(
                 Triple("center", "Center", Icons.Default.FormatAlignCenter),
                 Triple("right", "Right", Icons.Default.FormatAlignRight)
             ).forEach { (key, label, icon) ->
-                val isSelected = (activeTheme.titleAlignment.ifEmpty { "center" }).equals(key, ignoreCase = true)
+                val isSelected = (activeTheme.textAlignment.ifEmpty { "left" }).equals(key, ignoreCase = true)
                 Surface(
-                    onClick = { onUpdateTheme { it.copy(titleAlignment = key) } },
+                    onClick = { onUpdateTheme { it.copy(textAlignment = key) } },
                     shape = RoundedCornerShape(10.dp),
                     color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.40f),
                     border = BorderStroke(
@@ -1969,8 +1969,8 @@ private fun EditorColorsPage(
     onClose: () -> Unit
 ) {
     val currentHex = when (activeRole) {
-        ColorRole.TITLE_1 -> activeTheme.primaryTitleColor ?: activeTheme.colors.headingText
-        ColorRole.TITLE_2 -> activeTheme.secondaryTitleColor ?: activeTheme.colors.text
+        ColorRole.TITLE_1 -> activeTheme.overrides?.headingText ?: activeTheme.colors.headingText
+        ColorRole.TITLE_2 -> activeTheme.colors.text
         ColorRole.PROSE -> activeTheme.colors.text
         ColorRole.DIALOGUE -> activeTheme.overrides?.dialogueText ?: activeTheme.colors.dialogueText
         ColorRole.THOUGHTS -> activeTheme.overrides?.monologueText ?: activeTheme.colors.monologueText
@@ -1979,8 +1979,8 @@ private fun EditorColorsPage(
 
     val applyColor: (String) -> Unit = { hex ->
         when (activeRole) {
-            ColorRole.TITLE_1 -> onUpdateTheme { it.copy(primaryTitleColor = hex) }
-            ColorRole.TITLE_2 -> onUpdateTheme { it.copy(secondaryTitleColor = hex) }
+            ColorRole.TITLE_1 -> onUpdateTheme { ThemeManager.updateSemanticOverride(it, "headingText", hex) }
+            ColorRole.TITLE_2 -> onUpdateTheme { ThemeManager.updateFoundationColors(it, newText = hex) }
             ColorRole.PROSE -> onUpdateTheme { ThemeManager.updateFoundationColors(it, newText = hex) }
             ColorRole.DIALOGUE -> onUpdateTheme { ThemeManager.updateSemanticOverride(it, "dialogueText", hex) }
             ColorRole.THOUGHTS -> onUpdateTheme { ThemeManager.updateSemanticOverride(it, "monologueText", hex) }
